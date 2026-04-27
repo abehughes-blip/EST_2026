@@ -703,9 +703,20 @@ function renderPlan() {
   }
   html.push(`</div>`);
 
-  if (data.blockPresets.length === 0) {
-    html.push(`<div class="empty" style="margin-top:8px">Tip: add block presets in Manage so you can tap to insert common blocks (Workout, Deep work, Buffer…).</div>`);
+  // Block presets — editable directly from the Plan tab so the loop "set up presets → plan days" stays here
+  html.push(`<h2>Block Presets</h2><div class="card">`);
+  for (const p of data.blockPresets) {
+    html.push(`<div class="row">
+      <div class="row-main"><div class="row-title">${escapeHtml(p.label)}</div></div>
+      <button class="btn-ghost" data-edit-preset="${p.id}">Edit</button>
+      <button class="btn-ghost" style="color:var(--red)" data-del-preset="${p.id}">Delete</button>
+    </div>`);
   }
+  if (data.blockPresets.length === 0) {
+    html.push(`<div class="empty">No presets yet. Add a few common blocks (Workout, Deep work, Buffer…) so chain-create can be tap-to-pick.</div>`);
+  }
+  html.push(`<div class="row"><button class="btn" data-add-preset>+ Add preset</button></div>`);
+  html.push(`</div>`);
 
   app.innerHTML = html.join('');
   app.querySelectorAll('[data-day-menu]').forEach(el => {
@@ -713,6 +724,13 @@ function renderPlan() {
   });
   app.querySelectorAll('[data-plan-day]').forEach(el => {
     el.onclick = () => openPlanDay(el.dataset.planDay);
+  });
+  app.querySelector('[data-add-preset]').onclick = () => editPreset();
+  app.querySelectorAll('[data-edit-preset]').forEach(b => b.onclick = () => editPreset(b.dataset.editPreset));
+  app.querySelectorAll('[data-del-preset]').forEach(b => b.onclick = () => {
+    if (!confirm('Delete this preset?')) return;
+    data.blockPresets = data.blockPresets.filter(p => p.id !== b.dataset.delPreset);
+    save(); render();
   });
 }
 
@@ -795,60 +813,69 @@ function showDayBlocks(dow) {
   });
 }
 
+// Two-step chain create: wheel → description → wheel → ...
+// Wheel uses progressive granularity (15→5→1 min), refining on each finger lift.
+// 1s after lifting (no further touch), auto-advances to the description page.
 function startChainCreate(dow, anchorTime) {
   const { wake, sleep } = getDayBounds(dow);
   let anchor = anchorTime || wake;
 
-  function showStep() {
+  const STAGE_STEPS = [15, 5, 1];
+  const STAGE_LABELS = ['15-min steps', '5-min steps', '1-min steps'];
+  const IDLE_MS = 1000;
+
+  function buildItemsHtml(stepMin, capMin) {
+    const ceiling = Math.min(capMin, 720);
+    const out = [];
+    for (let v = stepMin; v <= ceiling; v += stepMin) {
+      out.push(`<div class="wheel-item" data-v="${v}">${fmtMinsAsDur(v)}</div>`);
+    }
+    return out.join('');
+  }
+
+  function showWheelStep() {
     const anchorMin = hmToMin(anchor);
     const sleepMin = hmToMin(sleep);
-    const remaining = sleepMin - anchorMin;
-    if (remaining <= 0) {
+    const baseRemaining = sleepMin - anchorMin;
+    if (baseRemaining <= 0) {
       closeSheet();
       toast(`${DOW_LABEL[dow]} planned`);
       render();
       return;
     }
-    let extended = false;
-    let currentDur = 0;
 
-    const stepsHtml = (max) => durationSteps(max).map(v =>
-      `<div class="wheel-item" data-v="${v}">${fmtMinsAsDur(v)}</div>`
-    ).join('');
-    const presetChips = data.blockPresets.map(p =>
-      `<button class="chip" data-preset-id="${p.id}">${escapeHtml(p.label)}</button>`
-    ).join('');
+    let stage = 0;
+    let extended = false;
+    // Default to 60 min if it fits at the coarse stage; otherwise the largest 15-min value that fits
+    let currentDur = baseRemaining >= 60 ? 60 : Math.max(15, Math.floor(baseRemaining / 15) * 15 || 15);
+    let idleTimer = null;
 
     openSheet(`
       <div class="sheet-head">
-        <button class="btn-ghost" id="sCancel">Done</button>
+        <button class="btn-ghost" id="sCancel">Cancel</button>
         <h3>${DOW_LABEL[dow]} · ${anchor}</h3>
         <span style="width:48px"></span>
       </div>
-      <div class="row-sub" style="padding:0 4px 4px">Block starts at <strong style="color:var(--text)">${anchor}</strong> · ${fmtMinsAsDur(remaining)} until ${sleep}</div>
-      <label>Duration</label>
+      <div class="row-sub" style="padding:0 4px 4px">Starts at <strong style="color:var(--text)">${anchor}</strong> · ${fmtMinsAsDur(baseRemaining)} until ${sleep}</div>
+      <label>Duration <span id="stageLabel" style="float:right;color:var(--muted);font-weight:400">${STAGE_LABELS[0]}</span></label>
       <div class="wheel-wrap">
         <div class="wheel" id="wheel">
           <div class="wheel-spacer"></div>
-          ${stepsHtml(remaining)}
+          ${buildItemsHtml(STAGE_STEPS[0], baseRemaining)}
           <div class="wheel-spacer"></div>
         </div>
         <div class="wheel-center-line"></div>
       </div>
       <div class="end-preview">Ends at <strong id="endTime">—</strong></div>
-      <button class="btn btn-secondary" id="sExtend" style="width:100%;margin-top:10px;display:none">Extend past ${sleep}</button>
-      <label style="margin-top:14px">Description</label>
-      <input id="fTitle" placeholder="What's this block?" autocomplete="off">
-      ${presetChips ? `<label style="margin-top:10px">Presets</label><div class="chips">${presetChips}</div>` : ''}
-      <button class="btn" id="sAdd" style="width:100%;margin-top:14px;opacity:0.5" disabled>Add block</button>
+      <button class="btn btn-secondary" id="sExtend" style="width:100%;margin-top:10px">Extend past ${sleep}</button>
+      <div class="row-sub" style="text-align:center;margin-top:10px;font-size:12px">Lift to refine · pause to continue</div>
     `, sh => {
       const wheel = sh.querySelector('#wheel');
       const endEl = sh.querySelector('#endTime');
-      const titleInp = sh.querySelector('#fTitle');
-      const addBtn = sh.querySelector('#sAdd');
+      const stageLbl = sh.querySelector('#stageLabel');
       const extendBtn = sh.querySelector('#sExtend');
 
-      const itemAtCenter = () => {
+      const updateCenter = () => {
         const centerY = wheel.scrollTop + wheel.clientHeight / 2;
         let best = null, bestD = Infinity;
         wheel.querySelectorAll('.wheel-item').forEach(el => {
@@ -856,88 +883,143 @@ function startChainCreate(dow, anchorTime) {
           const d = Math.abs(c - centerY);
           if (d < bestD) { bestD = d; best = el; }
         });
-        return best;
-      };
-      const updateCenter = () => {
-        const best = itemAtCenter();
         wheel.querySelectorAll('.wheel-item.selected').forEach(el => el.classList.remove('selected'));
-        if (!best) return;
-        best.classList.add('selected');
-        currentDur = +best.dataset.v;
-        endEl.textContent = hmFromMin(anchorMin + currentDur);
-        const items = wheel.querySelectorAll('.wheel-item');
-        const isLast = items.length && best === items[items.length - 1];
-        extendBtn.style.display = (!extended && isLast) ? 'block' : 'none';
-        updateAddState();
+        if (best) {
+          best.classList.add('selected');
+          currentDur = +best.dataset.v;
+          endEl.textContent = hmFromMin(anchorMin + currentDur);
+        }
       };
-      const updateAddState = () => {
-        const ok = currentDur > 0 && titleInp.value.trim().length > 0;
-        addBtn.disabled = !ok;
-        addBtn.style.opacity = ok ? '1' : '0.5';
-      };
+
       const scrollToValue = (target) => {
-        requestAnimationFrame(() => {
-          const items = [...wheel.querySelectorAll('.wheel-item')];
-          if (!items.length) return;
-          let best = items[0], bestD = Infinity;
-          for (const el of items) {
-            const d = Math.abs((+el.dataset.v) - target);
-            if (d < bestD) { bestD = d; best = el; }
-          }
-          wheel.scrollTop = best.offsetTop + best.offsetHeight / 2 - wheel.clientHeight / 2;
-          updateCenter();
-        });
+        const items = [...wheel.querySelectorAll('.wheel-item')];
+        if (!items.length) return;
+        let best = items[0], bestD = Infinity;
+        for (const el of items) {
+          const d = Math.abs((+el.dataset.v) - target);
+          if (d < bestD) { bestD = d; best = el; }
+        }
+        wheel.scrollTop = best.offsetTop + best.offsetHeight / 2 - wheel.clientHeight / 2;
+        updateCenter();
       };
-      // Default to 30 min so the wheel lands near a typical block instead of forcing a long scroll
-      const defaultDur = Math.min(30, remaining);
+
+      const renderStage = () => {
+        const cap = extended ? 720 : baseRemaining;
+        wheel.innerHTML =
+          `<div class="wheel-spacer"></div>` +
+          buildItemsHtml(STAGE_STEPS[stage], cap) +
+          `<div class="wheel-spacer"></div>`;
+        stageLbl.textContent = STAGE_LABELS[stage];
+        requestAnimationFrame(() => scrollToValue(currentDur));
+      };
+
+      const clearIdle = () => { clearTimeout(idleTimer); idleTimer = null; };
+      const armIdle = () => {
+        clearIdle();
+        idleTimer = setTimeout(() => {
+          if (currentDur <= 0) return;
+          closeSheet();
+          setTimeout(() => showDescStep(currentDur), 280);
+        }, IDLE_MS);
+      };
+
+      const onTouchStart = () => clearIdle();
+      const onTouchEnd = () => {
+        if (stage < STAGE_STEPS.length - 1) {
+          stage++;
+          renderStage();
+        }
+        armIdle();
+      };
 
       let scrollT;
       wheel.addEventListener('scroll', () => {
         clearTimeout(scrollT);
-        scrollT = setTimeout(updateCenter, 60);
+        scrollT = setTimeout(updateCenter, 50);
       });
-      titleInp.addEventListener('input', updateAddState);
+      // Use both touch and pointer events for cross-device support
+      wheel.addEventListener('touchstart', onTouchStart, { passive: true });
+      wheel.addEventListener('touchend', onTouchEnd);
+      wheel.addEventListener('touchcancel', onTouchEnd);
+      wheel.addEventListener('pointerdown', onTouchStart);
+      wheel.addEventListener('pointerup', onTouchEnd);
+      wheel.addEventListener('pointercancel', onTouchEnd);
+      // Mouse-wheel scrolling on desktop also resets idle while in motion, then arms on stop
+      wheel.addEventListener('wheel', () => {
+        clearIdle();
+        clearTimeout(scrollT);
+        scrollT = setTimeout(() => { updateCenter(); armIdle(); }, 200);
+      }, { passive: true });
 
-      const commit = (title) => {
-        if (!title || currentDur <= 0) return;
-        const startMin = anchorMin;
-        const endMin = startMin + currentDur;
-        data.schedule[dow].blocks.push({
-          id: uid(),
-          start: hmFromMin(startMin),
-          end: hmFromMin(endMin),
-          title: title.trim()
-        });
-        save();
-        anchor = hmFromMin(endMin);
-        closeSheet();
-        // wait for sheet close transition before opening next so the slide feels distinct
-        setTimeout(showStep, 280);
+      sh.querySelector('#sCancel').onclick = () => { clearIdle(); closeSheet(); render(); };
+      extendBtn.onclick = () => {
+        clearIdle();
+        if (extended) return;
+        extended = true;
+        extendBtn.style.display = 'none';
+        renderStage();
       };
 
+      requestAnimationFrame(() => scrollToValue(currentDur));
+    });
+  }
+
+  function showDescStep(durMin) {
+    const anchorMin = hmToMin(anchor);
+    const endMin = anchorMin + durMin;
+    const startStr = hmFromMin(anchorMin);
+    const endStr = hmFromMin(endMin);
+
+    const presetChips = data.blockPresets.map(p =>
+      `<button class="chip" data-preset-id="${p.id}">${escapeHtml(p.label)}</button>`
+    ).join('');
+
+    openSheet(`
+      <div class="sheet-head">
+        <button class="btn-ghost" id="sBack">‹ Back</button>
+        <h3>${startStr}–${endStr} · ${fmtMinsAsDur(durMin)}</h3>
+        <button class="btn-ghost" id="sCancel">Cancel</button>
+      </div>
+      <label>Description</label>
+      <input id="fTitle" placeholder="What's this block?" autocomplete="off" enterkeyhint="done">
+      ${presetChips
+        ? `<label style="margin-top:14px">Presets</label><div class="chips">${presetChips}</div>`
+        : `<div class="empty" style="margin-top:8px">No presets yet — scroll down on the Plan tab to add some.</div>`}
+    `, sh => {
+      const titleInp = sh.querySelector('#fTitle');
+      // iOS sometimes ignores autofocus on dynamic content; nudge it on next frame
+      requestAnimationFrame(() => titleInp.focus());
+
+      const commit = (title) => {
+        title = (title || '').trim();
+        if (!title) return;
+        data.schedule[dow].blocks.push({
+          id: uid(),
+          start: startStr,
+          end: endStr,
+          title
+        });
+        save();
+        anchor = endStr;
+        closeSheet();
+        setTimeout(showWheelStep, 280);
+      };
+
+      titleInp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(titleInp.value); }
+      });
       sh.querySelectorAll('[data-preset-id]').forEach(b => {
         b.onclick = () => {
           const p = data.blockPresets.find(x => x.id === b.dataset.presetId);
           if (p) commit(p.label);
         };
       });
-      addBtn.onclick = () => commit(titleInp.value);
+      sh.querySelector('#sBack').onclick = () => { closeSheet(); setTimeout(showWheelStep, 280); };
       sh.querySelector('#sCancel').onclick = () => { closeSheet(); render(); };
-      extendBtn.onclick = () => {
-        extended = true;
-        const itemsHtml = durationSteps(720).map(v =>
-          `<div class="wheel-item" data-v="${v}">${fmtMinsAsDur(v)}</div>`
-        ).join('');
-        wheel.innerHTML = `<div class="wheel-spacer"></div>${itemsHtml}<div class="wheel-spacer"></div>`;
-        extendBtn.style.display = 'none';
-        scrollToValue(defaultDur);
-      };
-
-      scrollToValue(defaultDur);
     });
   }
 
-  showStep();
+  showWheelStep();
 }
 
 // ----- GOALS (long-term) -----
