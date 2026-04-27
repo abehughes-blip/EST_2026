@@ -127,6 +127,56 @@
   .actual-line.over { color: var(--orange); }
   .actual-line.under { color: var(--green); }
 
+  /* plan / chain-create */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    background: var(--surface-2); color: var(--text);
+    border-radius: 16px; padding: 8px 14px;
+    font-size: 14px; font-weight: 500;
+    border: 1px solid transparent;
+  }
+  .chip:active { background: var(--accent); color: white; }
+  .wheel-wrap {
+    position: relative; height: 200px;
+    margin: 8px -16px;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 25%, black 75%, transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0, black 25%, black 75%, transparent 100%);
+  }
+  .wheel {
+    height: 100%; overflow-y: scroll;
+    scroll-snap-type: y mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    overscroll-behavior: contain;
+  }
+  .wheel::-webkit-scrollbar { display: none; }
+  .wheel-spacer { height: 80px; flex-shrink: 0; pointer-events: none; }
+  .wheel-item {
+    height: 40px; line-height: 40px;
+    text-align: center;
+    scroll-snap-align: center;
+    font-size: 20px; font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    transition: color .12s, font-size .12s, font-weight .12s;
+  }
+  .wheel-item.selected {
+    color: var(--text);
+    font-size: 26px; font-weight: 700;
+  }
+  .wheel-center-line {
+    position: absolute; left: 24px; right: 24px;
+    top: 50%; height: 40px; transform: translateY(-50%);
+    border-top: 0.5px solid var(--border);
+    border-bottom: 0.5px solid var(--border);
+    pointer-events: none;
+  }
+  .end-preview {
+    text-align: center; font-size: 14px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .end-preview strong { color: var(--text); font-weight: 600; }
+
   nav#tabs {
     position: fixed; left: 0; right: 0; bottom: 0;
     background: rgba(20,20,22,0.85);
@@ -182,6 +232,7 @@
 <nav id="tabs">
   <button data-tab="today"><span class="ico">●</span><span>Today</span></button>
   <button data-tab="week"><span class="ico">▤</span><span>Week</span></button>
+  <button data-tab="plan"><span class="ico">✎</span><span>Plan</span></button>
   <button data-tab="goals"><span class="ico">◎</span><span>Goals</span></button>
   <button data-tab="manage"><span class="ico">≡</span><span>Manage</span></button>
 </nav>
@@ -203,7 +254,12 @@ const DEFAULT_DATA = () => ({
   weeklyChecklist: [],       // [{id, text}]
   weeklyChecklistLog: {},    // { "YYYY-Www": { itemId: true } }
   timeLog: {},        // { "YYYY-MM-DD": { blockId: { minutes, note } } }
-  schedule: {         // dow -> {blocks:[{id,start,end,title}], checklist:[{id,text}]}
+  defaults: {         // schedule defaults — overridable per-day
+    wakeTime: '06:00',
+    sleepTime: '22:00'
+  },
+  blockPresets: [],   // [{id, label}] — global library used by chain-create flow
+  schedule: {         // dow -> {blocks:[{id,start,end,title}], checklist:[{id,text}], wakeTime?, sleepTime?}
     mon: { blocks: [], checklist: [] },
     tue: { blocks: [], checklist: [] },
     wed: { blocks: [], checklist: [] },
@@ -268,6 +324,32 @@ function daysUntil(dateStr) {
   const now = new Date(); now.setHours(0,0,0,0);
   return Math.round((target - now) / 86400000);
 }
+function hmFromMin(mins) {
+  // 0..1439 so end times never become "24:00" (which breaks <input type=time> and string sorting)
+  const m = Math.max(0, Math.min(24*60 - 1, Math.round(mins)));
+  return String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0');
+}
+function getDayBounds(dow) {
+  const sched = data.schedule[dow] || {};
+  const wake = sched.wakeTime || (data.defaults && data.defaults.wakeTime) || '06:00';
+  const sleep = sched.sleepTime || (data.defaults && data.defaults.sleepTime) || '22:00';
+  return { wake, sleep };
+}
+// Variable-granularity duration steps: 5-min steps in the first hour, +5 min step every hour past.
+// 5,10,…,60, 70,80,…,120, 135,150,…,180, 200,220,…,240, …
+function durationSteps(maxMin) {
+  const out = [];
+  let v = 0;
+  const cap = Math.max(5, maxMin);
+  while (v < cap) {
+    const step = 5 * (1 + Math.floor(v / 60));
+    v += step;
+    if (v > cap) break;
+    out.push(v);
+    if (v >= 720) break; // 12h hard ceiling
+  }
+  return out;
+}
 
 // ---------- toast ----------
 let toastTimer;
@@ -305,6 +387,7 @@ function render() {
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === currentTab));
   if (currentTab === 'today') renderToday();
   else if (currentTab === 'week') renderWeek();
+  else if (currentTab === 'plan') renderPlan();
   else if (currentTab === 'goals') renderGoals();
   else if (currentTab === 'manage') renderManage();
 }
@@ -587,6 +670,230 @@ function renderWeek() {
   });
 }
 
+// ----- PLAN (week chain-create) -----
+function renderPlan() {
+  const html = [];
+  html.push(`<h1>Plan Week</h1>`);
+  html.push(`<div class="card">`);
+  for (const d of DOW_ORDER) {
+    const sched = data.schedule[d];
+    const { wake, sleep } = getDayBounds(d);
+    const n = sched.blocks.length;
+    const sub = n === 0
+      ? `Empty · ${wake}–${sleep}`
+      : `${n} block${n>1?'s':''} · ${wake}–${sleep}`;
+    html.push(`<div class="row tappable" data-plan-day="${d}">
+      <div class="row-main">
+        <div class="row-title">${DOW_LABEL[d]}</div>
+        <div class="row-sub">${sub}</div>
+      </div>
+      <div class="row-value" style="color:var(--muted)">›</div>
+    </div>`);
+  }
+  html.push(`</div>`);
+
+  if (data.blockPresets.length === 0) {
+    html.push(`<div class="empty" style="margin-top:8px">Tip: add block presets in Manage so you can tap to insert common blocks (Workout, Deep work, Buffer…).</div>`);
+  }
+
+  app.innerHTML = html.join('');
+  app.querySelectorAll('[data-plan-day]').forEach(el => {
+    el.onclick = () => openPlanDay(el.dataset.planDay);
+  });
+}
+
+function openPlanDay(dow) {
+  const blocks = data.schedule[dow].blocks;
+  if (blocks.length === 0) {
+    startChainCreate(dow);
+  } else {
+    showDayBlocks(dow);
+  }
+}
+
+function showDayBlocks(dow) {
+  const sched = data.schedule[dow];
+  const blocks = [...sched.blocks].sort((a,b)=>a.start.localeCompare(b.start));
+  const { wake, sleep } = getDayBounds(dow);
+  const lastEnd = blocks.length ? blocks[blocks.length-1].end : wake;
+  const canExtend = hmToMin(lastEnd) < hmToMin(sleep);
+  openSheet(`
+    <div class="sheet-head">
+      <button class="btn-ghost" id="sCancel">Done</button>
+      <h3>${DOW_LABEL[dow]}</h3>
+      <button class="btn-ghost" id="sExtend" style="font-weight:600;${canExtend?'':'visibility:hidden'}">+ Add</button>
+    </div>
+    <div class="row-sub" style="padding:0 4px 8px">${wake} – ${sleep}</div>
+    ${blocks.map(b => {
+      const planned = Math.max(0, hmToMin(b.end) - hmToMin(b.start));
+      return `<div class="row tappable" data-edit-block="${b.id}">
+        <div class="row-main">
+          <div class="row-title">${escapeHtml(b.title)}</div>
+          <div class="row-sub">${b.start}–${b.end} · ${fmtMinsAsDur(planned)}</div>
+        </div>
+        <div class="row-value" style="color:var(--muted)">›</div>
+      </div>`;
+    }).join('')}
+  `, sh => {
+    sh.querySelector('#sCancel').onclick = () => { closeSheet(); render(); };
+    sh.querySelector('#sExtend').onclick = () => {
+      closeSheet();
+      startChainCreate(dow, lastEnd);
+    };
+    sh.querySelectorAll('[data-edit-block]').forEach(el => {
+      el.onclick = () => {
+        closeSheet();
+        editBlock(dow, el.dataset.editBlock);
+      };
+    });
+  });
+}
+
+function startChainCreate(dow, anchorTime) {
+  const { wake, sleep } = getDayBounds(dow);
+  let anchor = anchorTime || wake;
+
+  function showStep() {
+    const anchorMin = hmToMin(anchor);
+    const sleepMin = hmToMin(sleep);
+    const remaining = sleepMin - anchorMin;
+    if (remaining <= 0) {
+      closeSheet();
+      toast(`${DOW_LABEL[dow]} planned`);
+      render();
+      return;
+    }
+    let extended = false;
+    let currentDur = 0;
+
+    const stepsHtml = (max) => durationSteps(max).map(v =>
+      `<div class="wheel-item" data-v="${v}">${fmtMinsAsDur(v)}</div>`
+    ).join('');
+    const presetChips = data.blockPresets.map(p =>
+      `<button class="chip" data-preset-id="${p.id}">${escapeHtml(p.label)}</button>`
+    ).join('');
+
+    openSheet(`
+      <div class="sheet-head">
+        <button class="btn-ghost" id="sCancel">Done</button>
+        <h3>${DOW_LABEL[dow]} · ${anchor}</h3>
+        <span style="width:48px"></span>
+      </div>
+      <div class="row-sub" style="padding:0 4px 4px">Block starts at <strong style="color:var(--text)">${anchor}</strong> · ${fmtMinsAsDur(remaining)} until ${sleep}</div>
+      <label>Duration</label>
+      <div class="wheel-wrap">
+        <div class="wheel" id="wheel">
+          <div class="wheel-spacer"></div>
+          ${stepsHtml(remaining)}
+          <div class="wheel-spacer"></div>
+        </div>
+        <div class="wheel-center-line"></div>
+      </div>
+      <div class="end-preview">Ends at <strong id="endTime">—</strong></div>
+      <button class="btn btn-secondary" id="sExtend" style="width:100%;margin-top:10px;display:none">Extend past ${sleep}</button>
+      <label style="margin-top:14px">Description</label>
+      <input id="fTitle" placeholder="What's this block?" autocomplete="off">
+      ${presetChips ? `<label style="margin-top:10px">Presets</label><div class="chips">${presetChips}</div>` : ''}
+      <button class="btn" id="sAdd" style="width:100%;margin-top:14px;opacity:0.5" disabled>Add block</button>
+    `, sh => {
+      const wheel = sh.querySelector('#wheel');
+      const endEl = sh.querySelector('#endTime');
+      const titleInp = sh.querySelector('#fTitle');
+      const addBtn = sh.querySelector('#sAdd');
+      const extendBtn = sh.querySelector('#sExtend');
+
+      const itemAtCenter = () => {
+        const centerY = wheel.scrollTop + wheel.clientHeight / 2;
+        let best = null, bestD = Infinity;
+        wheel.querySelectorAll('.wheel-item').forEach(el => {
+          const c = el.offsetTop + el.offsetHeight / 2;
+          const d = Math.abs(c - centerY);
+          if (d < bestD) { bestD = d; best = el; }
+        });
+        return best;
+      };
+      const updateCenter = () => {
+        const best = itemAtCenter();
+        wheel.querySelectorAll('.wheel-item.selected').forEach(el => el.classList.remove('selected'));
+        if (!best) return;
+        best.classList.add('selected');
+        currentDur = +best.dataset.v;
+        endEl.textContent = hmFromMin(anchorMin + currentDur);
+        const items = wheel.querySelectorAll('.wheel-item');
+        const isLast = items.length && best === items[items.length - 1];
+        extendBtn.style.display = (!extended && isLast) ? 'block' : 'none';
+        updateAddState();
+      };
+      const updateAddState = () => {
+        const ok = currentDur > 0 && titleInp.value.trim().length > 0;
+        addBtn.disabled = !ok;
+        addBtn.style.opacity = ok ? '1' : '0.5';
+      };
+      const scrollToValue = (target) => {
+        requestAnimationFrame(() => {
+          const items = [...wheel.querySelectorAll('.wheel-item')];
+          if (!items.length) return;
+          let best = items[0], bestD = Infinity;
+          for (const el of items) {
+            const d = Math.abs((+el.dataset.v) - target);
+            if (d < bestD) { bestD = d; best = el; }
+          }
+          wheel.scrollTop = best.offsetTop + best.offsetHeight / 2 - wheel.clientHeight / 2;
+          updateCenter();
+        });
+      };
+      // Default to 30 min so the wheel lands near a typical block instead of forcing a long scroll
+      const defaultDur = Math.min(30, remaining);
+
+      let scrollT;
+      wheel.addEventListener('scroll', () => {
+        clearTimeout(scrollT);
+        scrollT = setTimeout(updateCenter, 60);
+      });
+      titleInp.addEventListener('input', updateAddState);
+
+      const commit = (title) => {
+        if (!title || currentDur <= 0) return;
+        const startMin = anchorMin;
+        const endMin = startMin + currentDur;
+        data.schedule[dow].blocks.push({
+          id: uid(),
+          start: hmFromMin(startMin),
+          end: hmFromMin(endMin),
+          title: title.trim()
+        });
+        save();
+        anchor = hmFromMin(endMin);
+        closeSheet();
+        // wait for sheet close transition before opening next so the slide feels distinct
+        setTimeout(showStep, 280);
+      };
+
+      sh.querySelectorAll('[data-preset-id]').forEach(b => {
+        b.onclick = () => {
+          const p = data.blockPresets.find(x => x.id === b.dataset.presetId);
+          if (p) commit(p.label);
+        };
+      });
+      addBtn.onclick = () => commit(titleInp.value);
+      sh.querySelector('#sCancel').onclick = () => { closeSheet(); render(); };
+      extendBtn.onclick = () => {
+        extended = true;
+        const itemsHtml = durationSteps(720).map(v =>
+          `<div class="wheel-item" data-v="${v}">${fmtMinsAsDur(v)}</div>`
+        ).join('');
+        wheel.innerHTML = `<div class="wheel-spacer"></div>${itemsHtml}<div class="wheel-spacer"></div>`;
+        extendBtn.style.display = 'none';
+        scrollToValue(defaultDur);
+      };
+
+      scrollToValue(defaultDur);
+    });
+  }
+
+  showStep();
+}
+
 // ----- GOALS (long-term) -----
 function renderGoals() {
   const html = [];
@@ -695,12 +1002,51 @@ function renderManage() {
   html.push(`<div class="row"><button class="btn" data-add-goal>+ Add long-term goal</button></div>`);
   html.push(`</div>`);
 
+  // Schedule defaults
+  const def = data.defaults || { wakeTime: '06:00', sleepTime: '22:00' };
+  html.push(`<h2>Schedule Defaults</h2><div class="card">
+    <div class="row">
+      <div class="row-main">
+        <div class="row-title">Default wake time</div>
+        <div class="row-sub">Used when a day has no override</div>
+      </div>
+      <input type="time" data-def-wake style="width:120px" value="${escapeAttr(def.wakeTime || '06:00')}">
+    </div>
+    <div class="row">
+      <div class="row-main">
+        <div class="row-title">Default sleep time</div>
+        <div class="row-sub">Plan stops here unless overridden</div>
+      </div>
+      <input type="time" data-def-sleep style="width:120px" value="${escapeAttr(def.sleepTime || '22:00')}">
+    </div>
+  </div>`);
+
+  // Block presets
+  html.push(`<h2>Block Presets</h2><div class="card">`);
+  for (const p of data.blockPresets) {
+    html.push(`<div class="row">
+      <div class="row-main"><div class="row-title">${escapeHtml(p.label)}</div></div>
+      <button class="btn-ghost" data-edit-preset="${p.id}">Edit</button>
+      <button class="btn-ghost" style="color:var(--red)" data-del-preset="${p.id}">Delete</button>
+    </div>`);
+  }
+  html.push(`<div class="row"><button class="btn" data-add-preset>+ Add preset</button></div>`);
+  html.push(`</div>`);
+
   // Schedule
   html.push(`<h2>Weekly Schedule</h2>`);
   for (const d of DOW_ORDER) {
     const sched = data.schedule[d];
     html.push(`<h3 style="margin:16px 4px 6px;font-size:14px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">${DOW_LABEL[d]}</h3>`);
     html.push(`<div class="card">`);
+    html.push(`<div class="row">
+      <div class="row-main">
+        <div class="row-title">Wake / Sleep override</div>
+        <div class="row-sub">Leave blank to use defaults (${def.wakeTime||'06:00'} / ${def.sleepTime||'22:00'})</div>
+      </div>
+      <input type="time" data-day-wake="${d}" style="width:90px" value="${escapeAttr(sched.wakeTime||'')}">
+      <input type="time" data-day-sleep="${d}" style="width:90px" value="${escapeAttr(sched.sleepTime||'')}">
+    </div>`);
     const sorted = [...sched.blocks].sort((a,b)=>a.start.localeCompare(b.start));
     for (const b of sorted) {
       html.push(`<div class="row">
@@ -786,6 +1132,37 @@ function wireManage() {
   app.querySelectorAll('[data-del-goal]').forEach(b => b.onclick = () => {
     if (!confirm('Delete this long-term goal?')) return;
     data.longTermGoals = data.longTermGoals.filter(g => g.id !== b.dataset.delGoal);
+    save(); render();
+  });
+  // schedule defaults
+  data.defaults = data.defaults || { wakeTime: '06:00', sleepTime: '22:00' };
+  const defWake = app.querySelector('[data-def-wake]');
+  const defSleep = app.querySelector('[data-def-sleep]');
+  if (defWake) defWake.onchange = () => { data.defaults.wakeTime = defWake.value || '06:00'; save(); render(); };
+  if (defSleep) defSleep.onchange = () => { data.defaults.sleepTime = defSleep.value || '22:00'; save(); render(); };
+  // per-day wake/sleep overrides
+  app.querySelectorAll('[data-day-wake]').forEach(inp => {
+    inp.onchange = () => {
+      const d = inp.dataset.dayWake;
+      if (inp.value) data.schedule[d].wakeTime = inp.value;
+      else delete data.schedule[d].wakeTime;
+      save();
+    };
+  });
+  app.querySelectorAll('[data-day-sleep]').forEach(inp => {
+    inp.onchange = () => {
+      const d = inp.dataset.daySleep;
+      if (inp.value) data.schedule[d].sleepTime = inp.value;
+      else delete data.schedule[d].sleepTime;
+      save();
+    };
+  });
+  // block presets
+  app.querySelector('[data-add-preset]').onclick = () => editPreset();
+  app.querySelectorAll('[data-edit-preset]').forEach(b => b.onclick = () => editPreset(b.dataset.editPreset));
+  app.querySelectorAll('[data-del-preset]').forEach(b => b.onclick = () => {
+    if (!confirm('Delete this preset?')) return;
+    data.blockPresets = data.blockPresets.filter(p => p.id !== b.dataset.delPreset);
     save(); render();
   });
   // schedule blocks
@@ -986,6 +1363,29 @@ function editChecklistItem(dow, id) {
       if (!text) { toast('Task required'); return; }
       item.text = text;
       if (!id) list.push(item);
+      save(); closeSheet(); render();
+    };
+  });
+}
+
+function editPreset(id) {
+  const list = data.blockPresets;
+  const p = id ? list.find(x => x.id === id) : { id: uid(), label: '' };
+  openSheet(`
+    <div class="sheet-head">
+      <button class="btn-ghost" id="sCancel">Cancel</button>
+      <h3>${id?'Edit':'New'} preset</h3>
+      <button class="btn-ghost" id="sSave" style="font-weight:600">Save</button>
+    </div>
+    <label>Label</label>
+    <input id="fLabel" placeholder="e.g. Workout, Deep work, Buffer" value="${escapeAttr(p.label)}">
+  `, sh => {
+    sh.querySelector('#sCancel').onclick = closeSheet;
+    sh.querySelector('#sSave').onclick = () => {
+      const label = sh.querySelector('#fLabel').value.trim();
+      if (!label) { toast('Label required'); return; }
+      p.label = label;
+      if (!id) list.push(p);
       save(); closeSheet(); render();
     };
   });
