@@ -737,26 +737,48 @@ function renderPlan() {
 function editDayTimes(dow) {
   const sched = data.schedule[dow];
   const def = data.defaults || { wakeTime: '06:00', sleepTime: '22:00' };
+  // Pre-fill with effective values so the time picker opens at the configured wake/sleep
+  // instead of the current clock time when no override exists.
+  const wakeFill = sched.wakeTime || def.wakeTime;
+  const sleepFill = sched.sleepTime || def.sleepTime;
   openSheet(`
     <div class="sheet-head">
       <button class="btn-ghost" id="sCancel">Cancel</button>
       <h3>${DOW_LABEL[dow]} times</h3>
       <button class="btn-ghost" id="sSave" style="font-weight:600">Save</button>
     </div>
-    <div class="row-sub" style="padding:0 4px 8px">Leave blank to use the defaults (${def.wakeTime} / ${def.sleepTime}).</div>
+    <div class="row-sub" style="padding:0 4px 8px">Defaults: ${def.wakeTime} / ${def.sleepTime}. Matching the default clears the override.</div>
     <label>Wake time</label>
-    <input id="fWake" type="time" value="${escapeAttr(sched.wakeTime || '')}">
+    <input id="fWake" type="time" value="${escapeAttr(wakeFill)}">
     <label>Sleep time</label>
-    <input id="fSleep" type="time" value="${escapeAttr(sched.sleepTime || '')}">
-    ${(sched.wakeTime || sched.sleepTime) ? `<button class="btn btn-secondary" id="sClear" style="width:100%;margin-top:14px">Clear overrides</button>` : ''}
+    <input id="fSleep" type="time" value="${escapeAttr(sleepFill)}">
+    <button class="btn btn-secondary" id="sApplyAll" style="width:100%;margin-top:14px">Apply to all days</button>
+    ${(sched.wakeTime || sched.sleepTime) ? `<button class="btn-ghost" id="sClear" style="width:100%;margin-top:6px;color:var(--red)">Clear this day's override</button>` : ''}
   `, sh => {
+    const persist = () => {
+      const w = sh.querySelector('#fWake').value || wakeFill;
+      const s = sh.querySelector('#fSleep').value || sleepFill;
+      if (w && w !== def.wakeTime) sched.wakeTime = w; else delete sched.wakeTime;
+      if (s && s !== def.sleepTime) sched.sleepTime = s; else delete sched.sleepTime;
+    };
     sh.querySelector('#sCancel').onclick = closeSheet;
     sh.querySelector('#sSave').onclick = () => {
-      const w = sh.querySelector('#fWake').value;
-      const s = sh.querySelector('#fSleep').value;
-      if (w) sched.wakeTime = w; else delete sched.wakeTime;
-      if (s) sched.sleepTime = s; else delete sched.sleepTime;
+      persist();
       save(); closeSheet(); render();
+    };
+    sh.querySelector('#sApplyAll').onclick = () => {
+      const w = sh.querySelector('#fWake').value || wakeFill;
+      const s = sh.querySelector('#fSleep').value || sleepFill;
+      data.defaults = data.defaults || {};
+      if (w) data.defaults.wakeTime = w;
+      if (s) data.defaults.sleepTime = s;
+      // Clear every per-day override so all days inherit these values
+      for (const d of DOW_ORDER) {
+        delete data.schedule[d].wakeTime;
+        delete data.schedule[d].sleepTime;
+      }
+      save(); closeSheet(); render();
+      toast('Applied to all days');
     };
     const clr = sh.querySelector('#sClear');
     if (clr) clr.onclick = () => {
@@ -813,15 +835,16 @@ function showDayBlocks(dow) {
   });
 }
 
-// Two-step chain create: wheel → description → wheel → ...
-// Wheel uses progressive granularity (15→5→1 min), refining on each finger lift.
-// 1s after lifting (no further touch), auto-advances to the description page.
+// Two-step chain create: description → (wheel if needed) → commit → next description...
+// Presets with a defaultMinutes commit immediately on tap.
+// Wheel uses progressive granularity (15→5→1 min), refining on each finger lift,
+// and 1s after the last lift it commits the block automatically.
 function startChainCreate(dow, anchorTime) {
   const { wake, sleep } = getDayBounds(dow);
   let anchor = anchorTime || wake;
 
-  const STAGE_STEPS = [15, 5, 1];
-  const STAGE_LABELS = ['15-min steps', '5-min steps', '1-min steps'];
+  const STAGE_STEPS = [15, 1];
+  const STAGE_LABELS = ['15-min steps', '1-min steps'];
   const IDLE_MS = 1000;
 
   function buildItemsHtml(stepMin, capMin) {
@@ -833,7 +856,32 @@ function startChainCreate(dow, anchorTime) {
     return out.join('');
   }
 
-  function showWheelStep() {
+  function commitBlock(title, durMin) {
+    title = (title || '').trim();
+    if (!title || durMin <= 0) return;
+    const anchorMin = hmToMin(anchor);
+    const endMin = anchorMin + durMin;
+    data.schedule[dow].blocks.push({
+      id: uid(),
+      start: hmFromMin(anchorMin),
+      end: hmFromMin(endMin),
+      title
+    });
+    save();
+    anchor = hmFromMin(endMin);
+  }
+
+  function next() {
+    if (hmToMin(anchor) >= hmToMin(sleep)) {
+      closeSheet();
+      toast(`${DOW_LABEL[dow]} planned`);
+      render();
+      return;
+    }
+    setTimeout(showDescStep, 280);
+  }
+
+  function showWheelStep(title) {
     const anchorMin = hmToMin(anchor);
     const sleepMin = hmToMin(sleep);
     const baseRemaining = sleepMin - anchorMin;
@@ -852,9 +900,9 @@ function startChainCreate(dow, anchorTime) {
 
     openSheet(`
       <div class="sheet-head">
+        <button class="btn-ghost" id="sBack">‹ Back</button>
+        <h3>${escapeHtml(title)}</h3>
         <button class="btn-ghost" id="sCancel">Cancel</button>
-        <h3>${DOW_LABEL[dow]} · ${anchor}</h3>
-        <span style="width:48px"></span>
       </div>
       <div class="row-sub" style="padding:0 4px 4px">Starts at <strong style="color:var(--text)">${anchor}</strong> · ${fmtMinsAsDur(baseRemaining)} until ${sleep}</div>
       <label>Duration <span id="stageLabel" style="float:right;color:var(--muted);font-weight:400">${STAGE_LABELS[0]}</span></label>
@@ -918,13 +966,17 @@ function startChainCreate(dow, anchorTime) {
         clearIdle();
         idleTimer = setTimeout(() => {
           if (currentDur <= 0) return;
+          commitBlock(title, currentDur);
           closeSheet();
-          setTimeout(() => showDescStep(currentDur), 280);
+          next();
         }, IDLE_MS);
       };
 
       const onTouchStart = () => clearIdle();
       const onTouchEnd = () => {
+        // Read latest position synchronously before refining so currentDur reflects
+        // exactly where the wheel sits at lift time (not a stale debounced value).
+        updateCenter();
         if (stage < STAGE_STEPS.length - 1) {
           stage++;
           renderStage();
@@ -937,20 +989,27 @@ function startChainCreate(dow, anchorTime) {
         clearTimeout(scrollT);
         scrollT = setTimeout(updateCenter, 50);
       });
-      // Use both touch and pointer events for cross-device support
-      wheel.addEventListener('touchstart', onTouchStart, { passive: true });
+      // Touch events only — iOS Safari fires pointercancel when a touchscroll begins,
+      // which would otherwise be misread as "lift" and refine the tier on touchstart.
+      // Mouse users on desktop interact via the wheel event below.
+      let hasTouch = false;
+      wheel.addEventListener('touchstart', () => { hasTouch = true; onTouchStart(); }, { passive: true });
       wheel.addEventListener('touchend', onTouchEnd);
-      wheel.addEventListener('touchcancel', onTouchEnd);
-      wheel.addEventListener('pointerdown', onTouchStart);
-      wheel.addEventListener('pointerup', onTouchEnd);
-      wheel.addEventListener('pointercancel', onTouchEnd);
-      // Mouse-wheel scrolling on desktop also resets idle while in motion, then arms on stop
+      // Pointer events only when no touch (mouse drag): refine on real lift only.
+      wheel.addEventListener('pointerdown', () => { if (!hasTouch) onTouchStart(); });
+      wheel.addEventListener('pointerup', () => { if (!hasTouch) onTouchEnd(); });
+      // Mouse-wheel scrolling on desktop resets idle while in motion, then refines + arms on stop
       wheel.addEventListener('wheel', () => {
         clearIdle();
         clearTimeout(scrollT);
-        scrollT = setTimeout(() => { updateCenter(); armIdle(); }, 200);
+        scrollT = setTimeout(() => { onTouchEnd(); }, 200);
       }, { passive: true });
 
+      sh.querySelector('#sBack').onclick = () => {
+        clearIdle();
+        closeSheet();
+        setTimeout(() => showDescStep(title), 280);
+      };
       sh.querySelector('#sCancel').onclick = () => { clearIdle(); closeSheet(); render(); };
       extendBtn.onclick = () => {
         clearIdle();
@@ -964,62 +1023,73 @@ function startChainCreate(dow, anchorTime) {
     });
   }
 
-  function showDescStep(durMin) {
+  function showDescStep(prevTitle) {
     const anchorMin = hmToMin(anchor);
-    const endMin = anchorMin + durMin;
-    const startStr = hmFromMin(anchorMin);
-    const endStr = hmFromMin(endMin);
+    const sleepMin = hmToMin(sleep);
+    const remaining = sleepMin - anchorMin;
+    if (remaining <= 0) {
+      closeSheet();
+      toast(`${DOW_LABEL[dow]} planned`);
+      render();
+      return;
+    }
 
-    const presetChips = data.blockPresets.map(p =>
-      `<button class="chip" data-preset-id="${p.id}">${escapeHtml(p.label)}</button>`
-    ).join('');
+    const presetChips = data.blockPresets.map(p => {
+      const durSuffix = p.defaultMinutes
+        ? `<span style="opacity:0.6;font-weight:400;margin-left:6px">· ${fmtMinsAsDur(p.defaultMinutes)}</span>`
+        : '';
+      return `<button class="chip" data-preset-id="${p.id}">${escapeHtml(p.label)}${durSuffix}</button>`;
+    }).join('');
 
     openSheet(`
       <div class="sheet-head">
-        <button class="btn-ghost" id="sBack">‹ Back</button>
-        <h3>${startStr}–${endStr} · ${fmtMinsAsDur(durMin)}</h3>
         <button class="btn-ghost" id="sCancel">Cancel</button>
+        <h3>${DOW_LABEL[dow]} · ${anchor}</h3>
+        <span style="width:48px"></span>
       </div>
+      <div class="row-sub" style="padding:0 4px 4px">Starts at <strong style="color:var(--text)">${anchor}</strong> · ${fmtMinsAsDur(remaining)} until ${sleep}</div>
       <label>Description</label>
-      <input id="fTitle" placeholder="What's this block?" autocomplete="off" enterkeyhint="done">
+      <input id="fTitle" placeholder="What's this block?" autocomplete="off" enterkeyhint="next" value="${escapeAttr(prevTitle || '')}">
       ${presetChips
         ? `<label style="margin-top:14px">Presets</label><div class="chips">${presetChips}</div>`
-        : `<div class="empty" style="margin-top:8px">No presets yet — scroll down on the Plan tab to add some.</div>`}
+        : `<div class="empty" style="margin-top:8px">No presets yet — scroll to the bottom of the Plan tab to add some.</div>`}
     `, sh => {
       const titleInp = sh.querySelector('#fTitle');
-      // iOS sometimes ignores autofocus on dynamic content; nudge it on next frame
+      // iOS often ignores focus() on dynamically-injected inputs unless triggered by user gesture;
+      // chips/Enter still work even if keyboard doesn't pop automatically.
       requestAnimationFrame(() => titleInp.focus());
 
-      const commit = (title) => {
+      const proceed = (title, presetDur) => {
         title = (title || '').trim();
         if (!title) return;
-        data.schedule[dow].blocks.push({
-          id: uid(),
-          start: startStr,
-          end: endStr,
-          title
-        });
-        save();
-        anchor = endStr;
-        closeSheet();
-        setTimeout(showWheelStep, 280);
+        if (presetDur && presetDur > 0) {
+          // Preset has an automatic duration — commit immediately, capped to remaining time.
+          const dur = Math.min(presetDur, remaining);
+          if (dur <= 0) return;
+          commitBlock(title, dur);
+          closeSheet();
+          next();
+        } else {
+          // No automatic duration — hand off to wheel.
+          closeSheet();
+          setTimeout(() => showWheelStep(title), 280);
+        }
       };
 
       titleInp.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); commit(titleInp.value); }
+        if (e.key === 'Enter') { e.preventDefault(); proceed(titleInp.value); }
       });
       sh.querySelectorAll('[data-preset-id]').forEach(b => {
         b.onclick = () => {
           const p = data.blockPresets.find(x => x.id === b.dataset.presetId);
-          if (p) commit(p.label);
+          if (p) proceed(p.label, p.defaultMinutes);
         };
       });
-      sh.querySelector('#sBack').onclick = () => { closeSheet(); setTimeout(showWheelStep, 280); };
       sh.querySelector('#sCancel').onclick = () => { closeSheet(); render(); };
     });
   }
 
-  showWheelStep();
+  showDescStep();
 }
 
 // ----- GOALS (long-term) -----
@@ -1172,8 +1242,8 @@ function renderManage() {
         <div class="row-title">Wake / Sleep override</div>
         <div class="row-sub">Leave blank to use defaults (${def.wakeTime||'06:00'} / ${def.sleepTime||'22:00'})</div>
       </div>
-      <input type="time" data-day-wake="${d}" style="width:90px" value="${escapeAttr(sched.wakeTime||'')}">
-      <input type="time" data-day-sleep="${d}" style="width:90px" value="${escapeAttr(sched.sleepTime||'')}">
+      <input type="time" data-day-wake="${d}" style="width:90px" value="${escapeAttr(sched.wakeTime || def.wakeTime || '06:00')}">
+      <input type="time" data-day-sleep="${d}" style="width:90px" value="${escapeAttr(sched.sleepTime || def.sleepTime || '22:00')}">
     </div>`);
     const sorted = [...sched.blocks].sort((a,b)=>a.start.localeCompare(b.start));
     for (const b of sorted) {
@@ -1268,11 +1338,12 @@ function wireManage() {
   const defSleep = app.querySelector('[data-def-sleep]');
   if (defWake) defWake.onchange = () => { data.defaults.wakeTime = defWake.value || '06:00'; save(); render(); };
   if (defSleep) defSleep.onchange = () => { data.defaults.sleepTime = defSleep.value || '22:00'; save(); render(); };
-  // per-day wake/sleep overrides
+  // per-day wake/sleep overrides — only persist as override when value differs from default
   app.querySelectorAll('[data-day-wake]').forEach(inp => {
     inp.onchange = () => {
       const d = inp.dataset.dayWake;
-      if (inp.value) data.schedule[d].wakeTime = inp.value;
+      const defWake = (data.defaults && data.defaults.wakeTime) || '06:00';
+      if (inp.value && inp.value !== defWake) data.schedule[d].wakeTime = inp.value;
       else delete data.schedule[d].wakeTime;
       save();
     };
@@ -1280,7 +1351,8 @@ function wireManage() {
   app.querySelectorAll('[data-day-sleep]').forEach(inp => {
     inp.onchange = () => {
       const d = inp.dataset.daySleep;
-      if (inp.value) data.schedule[d].sleepTime = inp.value;
+      const defSleep = (data.defaults && data.defaults.sleepTime) || '22:00';
+      if (inp.value && inp.value !== defSleep) data.schedule[d].sleepTime = inp.value;
       else delete data.schedule[d].sleepTime;
       save();
     };
@@ -1498,7 +1570,17 @@ function editChecklistItem(dow, id) {
 
 function editPreset(id) {
   const list = data.blockPresets;
-  const p = id ? list.find(x => x.id === id) : { id: uid(), label: '' };
+  const p = id ? list.find(x => x.id === id) : { id: uid(), label: '', defaultMinutes: 0 };
+  // Common quick-pick durations; 0 = "Ask" (no auto-duration, opens wheel)
+  const quick = [0, 15, 30, 45, 60, 90, 120];
+  let dur = p.defaultMinutes || 0;
+  const isQuick = quick.includes(dur);
+
+  const chipsHtml = quick.map(d => {
+    const sel = d === dur ? 'background:var(--accent);color:white' : '';
+    return `<button class="chip" data-dur="${d}" style="${sel}">${d === 0 ? 'Ask' : fmtMinsAsDur(d)}</button>`;
+  }).join('');
+
   openSheet(`
     <div class="sheet-head">
       <button class="btn-ghost" id="sCancel">Cancel</button>
@@ -1507,12 +1589,34 @@ function editPreset(id) {
     </div>
     <label>Label</label>
     <input id="fLabel" placeholder="e.g. Workout, Deep work, Buffer" value="${escapeAttr(p.label)}">
+    <label>Default duration</label>
+    <div class="chips">${chipsHtml}</div>
+    <input id="fCustom" type="number" min="1" step="1" inputmode="numeric" placeholder="Custom (minutes)" value="${dur > 0 && !isQuick ? dur : ''}" style="margin-top:8px">
+    <div class="row-sub" style="padding:0 4px 0;margin-top:6px">"Ask" means tapping this preset opens the duration wheel.</div>
   `, sh => {
+    const refreshChips = () => {
+      sh.querySelectorAll('[data-dur]').forEach(b => {
+        b.style.cssText = (+b.dataset.dur === dur) ? 'background:var(--accent);color:white' : '';
+      });
+    };
+    sh.querySelectorAll('[data-dur]').forEach(b => {
+      b.onclick = () => {
+        dur = +b.dataset.dur;
+        sh.querySelector('#fCustom').value = '';
+        refreshChips();
+      };
+    });
+    sh.querySelector('#fCustom').addEventListener('input', e => {
+      const v = parseInt(e.target.value, 10);
+      dur = (v > 0) ? v : 0;
+      refreshChips();
+    });
     sh.querySelector('#sCancel').onclick = closeSheet;
     sh.querySelector('#sSave').onclick = () => {
       const label = sh.querySelector('#fLabel').value.trim();
       if (!label) { toast('Label required'); return; }
       p.label = label;
+      p.defaultMinutes = dur > 0 ? dur : 0;
       if (!id) list.push(p);
       save(); closeSheet(); render();
     };
