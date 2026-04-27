@@ -111,6 +111,22 @@
   .day-col .blk:last-child { border-bottom: none; }
   .blk-time { color: var(--muted); font-variant-numeric: tabular-nums; }
 
+  .row.past { }
+  .row.current { background: rgba(10,132,255,0.12); }
+  .row.future { opacity: 0.55; }
+  .row.tappable { cursor: pointer; }
+  .row.tappable:active { background: var(--surface-2); }
+  .badge {
+    display: inline-block; font-size: 11px; font-weight: 600;
+    padding: 2px 7px; border-radius: 8px; margin-left: 6px;
+    background: var(--surface-2); color: var(--muted);
+  }
+  .badge.now { background: var(--accent); color: white; }
+  .badge.logged { background: rgba(48,209,88,0.18); color: var(--green); }
+  .actual-line { font-size: 13px; color: var(--muted); margin-top: 2px; white-space: pre-wrap; }
+  .actual-line.over { color: var(--orange); }
+  .actual-line.under { color: var(--green); }
+
   nav#tabs {
     position: fixed; left: 0; right: 0; bottom: 0;
     background: rgba(20,20,22,0.85);
@@ -186,6 +202,7 @@ const DEFAULT_DATA = () => ({
   longTermGoals: [],  // {id, name, targetDate, notes, milestones:[{id,text,done}]}
   weeklyChecklist: [],       // [{id, text}]
   weeklyChecklistLog: {},    // { "YYYY-Www": { itemId: true } }
+  timeLog: {},        // { "YYYY-MM-DD": { blockId: { minutes, note } } }
   schedule: {         // dow -> {blocks:[{id,start,end,title}], checklist:[{id,text}]}
     mon: { blocks: [], checklist: [] },
     tue: { blocks: [], checklist: [] },
@@ -228,6 +245,19 @@ function isoWeekKey(d = new Date()) {
   const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
   const wk = Math.ceil((((t - yearStart) / 86400000) + 1) / 7);
   return t.getUTCFullYear() + '-W' + String(wk).padStart(2,'0');
+}
+function hmToMin(s) {
+  if (!s) return 0;
+  const [h, m] = s.split(':').map(Number);
+  return h * 60 + m;
+}
+function nowMin(d = new Date()) { return d.getHours() * 60 + d.getMinutes(); }
+function fmtMinsAsDur(mins) {
+  if (mins == null) return '';
+  const sign = mins < 0 ? '-' : '';
+  const a = Math.abs(mins);
+  const h = Math.floor(a / 60), m = a % 60;
+  return sign + (h > 0 ? `${h}h ${m}m` : `${m}m`);
 }
 function fmtDateLong(d = new Date()) {
   return d.toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric' });
@@ -337,17 +367,41 @@ function renderToday() {
   }
 
   // Today's schedule
+  const tLog = data.timeLog[dKey] = data.timeLog[dKey] || {};
   html.push(`<h2>${DOW_LABEL[dow]} Schedule</h2>`);
   if (sched.blocks.length === 0) {
     html.push(`<div class="card"><div class="empty">No time blocks for ${DOW_LABEL[dow]}.</div></div>`);
   } else {
     const sorted = [...sched.blocks].sort((a,b)=>a.start.localeCompare(b.start));
+    const now = nowMin();
     html.push(`<div class="card">`);
     for (const b of sorted) {
-      html.push(`<div class="row">
+      const startM = hmToMin(b.start);
+      const endM = hmToMin(b.end);
+      const planned = Math.max(0, endM - startM);
+      let phase = 'future';
+      if (now >= endM) phase = 'past';
+      else if (now >= startM) phase = 'current';
+
+      const logged = tLog[b.id];
+      const tappable = phase !== 'future';
+      let badge = '';
+      if (phase === 'current') badge = `<span class="badge now">NOW</span>`;
+      else if (phase === 'past' && logged) badge = `<span class="badge logged">LOGGED</span>`;
+
+      let actual = '';
+      if (logged) {
+        const diff = logged.minutes - planned;
+        const cls = diff > 0 ? 'over' : (diff < 0 ? 'under' : '');
+        const diffStr = diff === 0 ? 'on plan' : (diff > 0 ? `+${fmtMinsAsDur(diff)}` : `${fmtMinsAsDur(diff)}`);
+        actual = `<div class="actual-line ${cls}">Actual: ${fmtMinsAsDur(logged.minutes)} (${diffStr})${logged.note ? ' · ' + escapeHtml(logged.note) : ''}</div>`;
+      }
+
+      html.push(`<div class="row ${phase} ${tappable?'tappable':''}" ${tappable?`data-log-block="${b.id}"`:''}>
         <div class="row-main">
-          <div class="row-title">${escapeHtml(b.title)}</div>
-          <div class="row-sub">${b.start} – ${b.end}</div>
+          <div class="row-title">${escapeHtml(b.title)}${badge}</div>
+          <div class="row-sub">${b.start} – ${b.end} · ${fmtMinsAsDur(planned)} planned</div>
+          ${actual}
         </div>
       </div>`);
     }
@@ -401,6 +455,43 @@ function renderToday() {
       const id = el.dataset.toggleWeeklyCli;
       wcLog[id] = !wcLog[id];
       save(); render();
+    };
+  });
+  app.querySelectorAll('[data-log-block]').forEach(el => {
+    el.onclick = () => logTimeBlock(dKey, dow, el.dataset.logBlock);
+  });
+}
+
+function logTimeBlock(dKey, dow, blockId) {
+  const block = data.schedule[dow].blocks.find(b => b.id === blockId);
+  if (!block) return;
+  const planned = Math.max(0, hmToMin(block.end) - hmToMin(block.start));
+  const log = data.timeLog[dKey] = data.timeLog[dKey] || {};
+  const cur = log[blockId] || { minutes: planned, note: '' };
+  openSheet(`
+    <div class="sheet-head">
+      <button class="btn-ghost" id="sCancel">Cancel</button>
+      <h3>${escapeHtml(block.title)}</h3>
+      <button class="btn-ghost" id="sSave" style="font-weight:600">Save</button>
+    </div>
+    <div class="row-sub" style="padding:0 4px 8px">${block.start} – ${block.end} · ${fmtMinsAsDur(planned)} planned</div>
+    <label>Actual minutes spent</label>
+    <input id="fMin" type="number" min="0" step="1" inputmode="numeric" value="${cur.minutes}">
+    <label>Note (what you actually did)</label>
+    <textarea id="fNote" rows="3" placeholder="optional">${escapeHtml(cur.note || '')}</textarea>
+    ${log[blockId] ? `<button class="btn btn-danger" id="sClear" style="margin-top:14px;width:100%">Clear log</button>` : ''}
+  `, (sh) => {
+    sh.querySelector('#sCancel').onclick = closeSheet;
+    sh.querySelector('#sSave').onclick = () => {
+      const mins = Math.max(0, parseInt(sh.querySelector('#fMin').value, 10) || 0);
+      const note = sh.querySelector('#fNote').value.trim();
+      log[blockId] = { minutes: mins, note };
+      save(); closeSheet(); render();
+    };
+    const clr = sh.querySelector('#sClear');
+    if (clr) clr.onclick = () => {
+      delete log[blockId];
+      save(); closeSheet(); render();
     };
   });
 }
