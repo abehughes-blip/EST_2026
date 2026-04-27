@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Goals">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Goals</title>
+<style>
+  :root {
+    --bg: #000;
+    --surface: #1c1c1e;
+    --surface-2: #2c2c2e;
+    --text: #fff;
+    --muted: #8e8e93;
+    --accent: #0a84ff;
+    --green: #30d158;
+    --red: #ff453a;
+    --orange: #ff9f0a;
+    --border: #3a3a3c;
+    --safe-bottom: env(safe-area-inset-bottom);
+    --safe-top: env(safe-area-inset-top);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    overscroll-behavior-y: contain;
+  }
+  body {
+    min-height: 100vh;
+    padding-top: var(--safe-top);
+    padding-bottom: calc(72px + var(--safe-bottom));
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 12px 16px 24px; }
+  h1 { font-size: 28px; font-weight: 700; margin: 8px 0 16px; }
+  h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin: 24px 0 8px; padding: 0 4px; }
+  h3 { font-size: 17px; font-weight: 600; margin: 0; }
+  .card {
+    background: var(--surface);
+    border-radius: 12px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+  .row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .row:last-child { border-bottom: none; }
+  .row-main { flex: 1; min-width: 0; }
+  .row-title { font-size: 16px; font-weight: 500; }
+  .row-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .row-value { font-size: 17px; font-variant-numeric: tabular-nums; color: var(--text); }
+  button {
+    font: inherit; color: inherit;
+    background: none; border: none; cursor: pointer; padding: 0;
+  }
+  .btn {
+    background: var(--accent); color: white;
+    border-radius: 10px; padding: 10px 14px;
+    font-weight: 600; font-size: 15px;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn-secondary { background: var(--surface-2); color: var(--text); }
+  .btn-danger { background: var(--red); color: white; }
+  .btn-ghost { background: transparent; color: var(--accent); padding: 6px 8px; }
+  .icon-btn {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--surface-2); color: var(--text);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 600;
+  }
+  .icon-btn.plus { background: var(--accent); color: white; }
+  input, textarea, select {
+    background: var(--surface-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; font: inherit; width: 100%;
+  }
+  input[type="time"], input[type="date"], input[type="number"] { font-variant-numeric: tabular-nums; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+  .progress {
+    height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden;
+    margin-top: 6px;
+  }
+  .progress > span { display: block; height: 100%; background: var(--accent); transition: width .25s; }
+  .progress.done > span { background: var(--green); }
+  .check {
+    width: 26px; height: 26px; border-radius: 50%;
+    border: 1.5px solid var(--muted);
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    color: transparent; font-size: 16px; font-weight: 700;
+  }
+  .check.done { background: var(--green); border-color: var(--green); color: white; }
+  .check.done::after { content: "✓"; }
+  .stepper { display: inline-flex; align-items: center; gap: 6px; }
+  .stepper button { width: 32px; height: 32px; border-radius: 50%; background: var(--surface-2); font-size: 18px; font-weight: 600; }
+  .stepper .v { min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .empty { color: var(--muted); padding: 24px 16px; text-align: center; font-size: 14px; }
+  .pill { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--surface-2); color: var(--muted); }
+  .day-grid { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x mandatory; }
+  .day-grid::-webkit-scrollbar { display: none; }
+  .day-col { flex: 0 0 220px; scroll-snap-align: start; background: var(--surface); border-radius: 12px; padding: 12px; }
+  .day-col h4 { margin: 0 0 8px; font-size: 14px; }
+  .day-col .blk { font-size: 13px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .day-col .blk:last-child { border-bottom: none; }
+  .blk-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  nav#tabs {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: rgba(20,20,22,0.85);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border-top: 0.5px solid var(--border);
+    padding: 8px 0 calc(8px + var(--safe-bottom));
+    display: flex; justify-content: space-around;
+    z-index: 10;
+  }
+  nav#tabs button {
+    color: var(--muted); font-size: 11px; font-weight: 500;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 4px 12px;
+  }
+  nav#tabs button .ico { font-size: 22px; }
+  nav#tabs button.active { color: var(--accent); }
+
+  /* modal */
+  .sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 20; display: none; }
+  .sheet-bg.open { display: block; }
+  .sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 21;
+    background: var(--surface); border-radius: 16px 16px 0 0;
+    padding: 16px 16px calc(16px + var(--safe-bottom));
+    transform: translateY(100%); transition: transform .25s ease-out;
+    max-height: 85vh; overflow-y: auto;
+  }
+  .sheet.open { transform: translateY(0); }
+  .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .sheet-head h3 { font-size: 17px; }
+
+  .swipe { position: relative; }
+  .swipe .delete {
+    position: absolute; right: 0; top: 0; bottom: 0;
+    background: var(--red); color: white; padding: 0 16px;
+    display: none; align-items: center; font-weight: 600; font-size: 14px;
+    border-radius: 0 12px 12px 0;
+  }
+
+  .toast {
+    position: fixed; left: 50%; bottom: calc(90px + var(--safe-bottom));
+    transform: translateX(-50%); background: var(--surface-2); color: var(--text);
+    padding: 10px 16px; border-radius: 10px; font-size: 14px;
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+    z-index: 30;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<nav id="tabs">
+  <button data-tab="today"><span class="ico">●</span><span>Today</span></button>
+  <button data-tab="week"><span class="ico">▤</span><span>Week</span></button>
+  <button data-tab="goals"><span class="ico">◎</span><span>Goals</span></button>
+  <button data-tab="manage"><span class="ico">≡</span><span>Manage</span></button>
+</nav>
+<div class="sheet-bg" id="sheetBg"></div>
+<div class="sheet" id="sheet"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+// ---------- storage ----------
+const KEY = 'goals.v1';
+const DEFAULT_DATA = () => ({
+  dailyMetrics: [],   // {id, name, target, unit}
+  dailyLog: {},       // { "YYYY-MM-DD": { metricId: value } }
+  weeklyMetrics: [],
+  weeklyLog: {},      // { "YYYY-Www": { metricId: value } }
+  longTermGoals: [],  // {id, name, targetDate, notes, milestones:[{id,text,done}]}
+  schedule: {         // dow -> {blocks:[{id,start,end,title}], checklist:[{id,text}]}
+    mon: { blocks: [], checklist: [] },
+    tue: { blocks: [], checklist: [] },
+    wed: { blocks: [], checklist: [] },
+    thu: { blocks: [], checklist: [] },
+    fri: { blocks: [], checklist: [] },
+    sat: { blocks: [], checklist: [] },
+    sun: { blocks: [], checklist: [] }
+  },
+  checklistLog: {}    // { "YYYY-Www": { "dow:itemId": true } }
+});
+let data = load();
+
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return DEFAULT_DATA();
+    const parsed = JSON.parse(raw);
+    return Object.assign(DEFAULT_DATA(), parsed);
+  } catch { return DEFAULT_DATA(); }
+}
+function save() {
+  localStorage.setItem(KEY, JSON.stringify(data));
+}
+function uid() { return Math.random().toString(36).slice(2, 10); }
+
+// ---------- date helpers ----------
+const DOW = ['sun','mon','tue','wed','thu','fri','sat'];
+const DOW_LABEL = { mon:'Monday', tue:'Tuesday', wed:'Wednesday', thu:'Thursday', fri:'Friday', sat:'Saturday', sun:'Sunday' };
+const DOW_ORDER = ['mon','tue','wed','thu','fri','sat','sun'];
+
+function todayKey(d = new Date()) {
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function todayDow(d = new Date()) { return DOW[d.getDay()]; }
+function isoWeekKey(d = new Date()) {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  const wk = Math.ceil((((t - yearStart) / 86400000) + 1) / 7);
+  return t.getUTCFullYear() + '-W' + String(wk).padStart(2,'0');
+}
+function fmtDateLong(d = new Date()) {
+  return d.toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric' });
+}
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const target = new Date(dateStr + 'T00:00:00');
+  const now = new Date(); now.setHours(0,0,0,0);
+  return Math.round((target - now) / 86400000);
+}
+
+// ---------- toast ----------
+let toastTimer;
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 1500);
+}
+
+// ---------- sheet (modal) ----------
+function openSheet(html, onMount) {
+  const bg = document.getElementById('sheetBg');
+  const sh = document.getElementById('sheet');
+  sh.innerHTML = html;
+  bg.classList.add('open');
+  requestAnimationFrame(() => sh.classList.add('open'));
+  if (onMount) onMount(sh);
+}
+function closeSheet() {
+  const bg = document.getElementById('sheetBg');
+  const sh = document.getElementById('sheet');
+  sh.classList.remove('open');
+  bg.classList.remove('open');
+}
+document.getElementById('sheetBg').onclick = closeSheet;
+
+// ---------- views ----------
+const app = document.getElementById('app');
+let currentTab = 'today';
+
+function render() {
+  app.innerHTML = '';
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === currentTab));
+  if (currentTab === 'today') renderToday();
+  else if (currentTab === 'week') renderWeek();
+  else if (currentTab === 'goals') renderGoals();
+  else if (currentTab === 'manage') renderManage();
+}
+
+// ----- TODAY -----
+function renderToday() {
+  const dow = todayDow();
+  const dKey = todayKey();
+  const wKey = isoWeekKey();
+  const log = data.dailyLog[dKey] = data.dailyLog[dKey] || {};
+  const sched = data.schedule[dow];
+  const cLog = data.checklistLog[wKey] = data.checklistLog[wKey] || {};
+
+  const html = [];
+  html.push(`<h1>${fmtDateLong()}</h1>`);
+
+  // Daily metrics
+  html.push(`<h2>Daily</h2>`);
+  if (data.dailyMetrics.length === 0) {
+    html.push(`<div class="card"><div class="empty">No daily metrics yet. Add one in Manage.</div></div>`);
+  } else {
+    html.push(`<div class="card">`);
+    for (const m of data.dailyMetrics) {
+      const v = log[m.id] || 0;
+      const target = m.target || 0;
+      const pct = target > 0 ? Math.min(100, Math.round((v / target) * 100)) : (v > 0 ? 100 : 0);
+      const isCheckbox = !target || target === 1;
+      html.push(`<div class="row">
+        <div class="row-main">
+          <div class="row-title">${escapeHtml(m.name)}</div>
+          ${target ? `<div class="row-sub">${v} / ${target}${m.unit?' '+escapeHtml(m.unit):''}</div>` : (m.unit?`<div class="row-sub">${v} ${escapeHtml(m.unit)}</div>`:'')}
+          ${target ? `<div class="progress ${pct>=100?'done':''}"><span style="width:${pct}%"></span></div>` : ''}
+        </div>
+        ${isCheckbox
+          ? `<button class="check ${v>=1?'done':''}" data-toggle-daily="${m.id}"></button>`
+          : `<div class="stepper">
+              <button data-step-daily="${m.id}" data-delta="-1">−</button>
+              <span class="v">${v}</span>
+              <button data-step-daily="${m.id}" data-delta="1">+</button>
+            </div>`}
+      </div>`);
+    }
+    html.push(`</div>`);
+  }
+
+  // Today's schedule
+  html.push(`<h2>${DOW_LABEL[dow]} Schedule</h2>`);
+  if (sched.blocks.length === 0) {
+    html.push(`<div class="card"><div class="empty">No time blocks for ${DOW_LABEL[dow]}.</div></div>`);
+  } else {
+    const sorted = [...sched.blocks].sort((a,b)=>a.start.localeCompare(b.start));
+    html.push(`<div class="card">`);
+    for (const b of sorted) {
+      html.push(`<div class="row">
+        <div class="row-main">
+          <div class="row-title">${escapeHtml(b.title)}</div>
+          <div class="row-sub">${b.start} – ${b.end}</div>
+        </div>
+      </div>`);
+    }
+    html.push(`</div>`);
+  }
+
+  // Today's checklist
+  html.push(`<h2>${DOW_LABEL[dow]} Checklist</h2>`);
+  if (sched.checklist.length === 0) {
+    html.push(`<div class="card"><div class="empty">No checklist items for ${DOW_LABEL[dow]}.</div></div>`);
+  } else {
+    html.push(`<div class="card">`);
+    for (const item of sched.checklist) {
+      const k = `${dow}:${item.id}`;
+      const done = !!cLog[k];
+      html.push(`<div class="row">
+        <button class="check ${done?'done':''}" data-toggle-checklist="${k}"></button>
+        <div class="row-main"><div class="row-title">${escapeHtml(item.text)}</div></div>
+      </div>`);
+    }
+    html.push(`</div>`);
+  }
+
+  app.innerHTML = html.join('');
+
+  app.querySelectorAll('[data-toggle-daily]').forEach(el => {
+    el.onclick = () => {
+      const id = el.dataset.toggleDaily;
+      const cur = log[id] || 0;
+      log[id] = cur >= 1 ? 0 : 1;
+      save(); render();
+    };
+  });
+  app.querySelectorAll('[data-step-daily]').forEach(el => {
+    el.onclick = () => {
+      const id = el.dataset.stepDaily;
+      const d = parseInt(el.dataset.delta, 10);
+      log[id] = Math.max(0, (log[id] || 0) + d);
+      save(); render();
+    };
+  });
+  app.querySelectorAll('[data-toggle-checklist]').forEach(el => {
+    el.onclick = () => {
+      const k = el.dataset.toggleChecklist;
+      cLog[k] = !cLog[k];
+      save(); render();
+    };
+  });
+}
+
+// ----- WEEK -----
+function renderWeek() {
+  const wKey = isoWeekKey();
+  const wLog = data.weeklyLog[wKey] = data.weeklyLog[wKey] || {};
+
+  const html = [];
+  html.push(`<h1>This Week <span class="pill" style="vertical-align:middle">${wKey}</span></h1>`);
+
+  // Weekly metrics
+  html.push(`<h2>Weekly</h2>`);
+  if (data.weeklyMetrics.length === 0) {
+    html.push(`<div class="card"><div class="empty">No weekly metrics yet. Add one in Manage.</div></div>`);
+  } else {
+    html.push(`<div class="card">`);
+    for (const m of data.weeklyMetrics) {
+      const v = wLog[m.id] || 0;
+      const target = m.target || 0;
+      const pct = target > 0 ? Math.min(100, Math.round((v / target) * 100)) : (v > 0 ? 100 : 0);
+      html.push(`<div class="row">
+        <div class="row-main">
+          <div class="row-title">${escapeHtml(m.name)}</div>
+          ${target ? `<div class="row-sub">${v} / ${target}${m.unit?' '+escapeHtml(m.unit):''}</div>` : (m.unit?`<div class="row-sub">${v} ${escapeHtml(m.unit)}</div>`:'')}
+          ${target ? `<div class="progress ${pct>=100?'done':''}"><span style="width:${pct}%"></span></div>` : ''}
+        </div>
+        <div class="stepper">
+          <button data-step-weekly="${m.id}" data-delta="-1">−</button>
+          <span class="v">${v}</span>
+          <button data-step-weekly="${m.id}" data-delta="1">+</button>
+        </div>
+      </div>`);
+    }
+    html.push(`</div>`);
+  }
+
+  // Schedule overview
+  html.push(`<h2>Schedule</h2>`);
+  html.push(`<div class="day-grid">`);
+  for (const d of DOW_ORDER) {
+    const sched = data.schedule[d];
+    const blocks = [...sched.blocks].sort((a,b)=>a.start.localeCompare(b.start));
+    html.push(`<div class="day-col"><h4>${DOW_LABEL[d]}</h4>`);
+    if (blocks.length === 0 && sched.checklist.length === 0) {
+      html.push(`<div class="row-sub">—</div>`);
+    } else {
+      for (const b of blocks) {
+        html.push(`<div class="blk"><span class="blk-time">${b.start}–${b.end}</span> ${escapeHtml(b.title)}</div>`);
+      }
+      for (const i of sched.checklist) {
+        html.push(`<div class="blk">☐ ${escapeHtml(i.text)}</div>`);
+      }
+    }
+    html.push(`</div>`);
+  }
+  html.push(`</div>`);
+
+  app.innerHTML = html.join('');
+
+  app.querySelectorAll('[data-step-weekly]').forEach(el => {
+    el.onclick = () => {
+      const id = el.dataset.stepWeekly;
+      const d = parseInt(el.dataset.delta, 10);
+      wLog[id] = Math.max(0, (wLog[id] || 0) + d);
+      save(); render();
+    };
+  });
+}
+
+// ----- GOALS (long-term) -----
+function renderGoals() {
+  const html = [];
+  html.push(`<h1>Long-term Goals</h1>`);
+  if (data.longTermGoals.length === 0) {
+    html.push(`<div class="card"><div class="empty">No long-term goals yet. Add one in Manage.</div></div>`);
+  } else {
+    for (const g of data.longTermGoals) {
+      const total = g.milestones.length;
+      const done = g.milestones.filter(m => m.done).length;
+      const pct = total > 0 ? Math.round((done/total)*100) : 0;
+      const days = daysUntil(g.targetDate);
+      const daysLbl = days == null ? '' : days < 0 ? `${-days} days past` : `${days} days left`;
+      html.push(`<div class="card">
+        <div class="row">
+          <div class="row-main">
+            <div class="row-title">${escapeHtml(g.name)}</div>
+            <div class="row-sub">${g.targetDate ? escapeHtml(g.targetDate) + ' · ' + daysLbl : 'No target date'}</div>
+            ${total ? `<div class="row-sub" style="margin-top:4px">${done} / ${total} milestones</div>
+            <div class="progress ${pct>=100?'done':''}"><span style="width:${pct}%"></span></div>` : ''}
+            ${g.notes ? `<div class="row-sub" style="margin-top:6px;white-space:pre-wrap">${escapeHtml(g.notes)}</div>` : ''}
+          </div>
+        </div>`);
+      for (const m of g.milestones) {
+        html.push(`<div class="row">
+          <button class="check ${m.done?'done':''}" data-toggle-milestone="${g.id}:${m.id}"></button>
+          <div class="row-main"><div class="row-title" style="font-weight:400">${escapeHtml(m.text)}</div></div>
+        </div>`);
+      }
+      html.push(`</div>`);
+    }
+  }
+  app.innerHTML = html.join('');
+
+  app.querySelectorAll('[data-toggle-milestone]').forEach(el => {
+    el.onclick = () => {
+      const [gid, mid] = el.dataset.toggleMilestone.split(':');
+      const g = data.longTermGoals.find(x=>x.id===gid);
+      const m = g && g.milestones.find(x=>x.id===mid);
+      if (m) { m.done = !m.done; save(); render(); }
+    };
+  });
+}
+
+// ----- MANAGE -----
+function renderManage() {
+  const html = [];
+  html.push(`<h1>Manage</h1>`);
+
+  // Daily metrics
+  html.push(`<h2>Daily Metrics</h2><div class="card">`);
+  for (const m of data.dailyMetrics) {
+    html.push(`<div class="row">
+      <div class="row-main">
+        <div class="row-title">${escapeHtml(m.name)}</div>
+        <div class="row-sub">${m.target ? `target ${m.target}` : 'checkbox'}${m.unit?' '+escapeHtml(m.unit):''}</div>
+      </div>
+      <button class="btn-ghost" data-edit-daily="${m.id}">Edit</button>
+      <button class="btn-ghost" style="color:var(--red)" data-del-daily="${m.id}">Delete</button>
+    </div>`);
+  }
+  html.push(`<div class="row"><button class="btn" data-add-daily>+ Add daily metric</button></div>`);
+  html.push(`</div>`);
+
+  // Weekly metrics
+  html.push(`<h2>Weekly Metrics</h2><div class="card">`);
+  for (const m of data.weeklyMetrics) {
+    html.push(`<div class="row">
+      <div class="row-main">
+        <div class="row-title">${escapeHtml(m.name)}</div>
+        <div class="row-sub">${m.target ? `target ${m.target}` : 'count'}${m.unit?' '+escapeHtml(m.unit):''}</div>
+      </div>
+      <button class="btn-ghost" data-edit-weekly="${m.id}">Edit</button>
+      <button class="btn-ghost" style="color:var(--red)" data-del-weekly="${m.id}">Delete</button>
+    </div>`);
+  }
+  html.push(`<div class="row"><button class="btn" data-add-weekly>+ Add weekly metric</button></div>`);
+  html.push(`</div>`);
+
+  // Long-term goals
+  html.push(`<h2>Long-term Goals</h2><div class="card">`);
+  for (const g of data.longTermGoals) {
+    html.push(`<div class="row">
+      <div class="row-main">
+        <div class="row-title">${escapeHtml(g.name)}</div>
+        <div class="row-sub">${g.targetDate || 'no date'} · ${g.milestones.length} milestones</div>
+      </div>
+      <button class="btn-ghost" data-edit-goal="${g.id}">Edit</button>
+      <button class="btn-ghost" style="color:var(--red)" data-del-goal="${g.id}">Delete</button>
+    </div>`);
+  }
+  html.push(`<div class="row"><button class="btn" data-add-goal>+ Add long-term goal</button></div>`);
+  html.push(`</div>`);
+
+  // Schedule
+  html.push(`<h2>Weekly Schedule</h2>`);
+  for (const d of DOW_ORDER) {
+    const sched = data.schedule[d];
+    html.push(`<h3 style="margin:16px 4px 6px;font-size:14px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">${DOW_LABEL[d]}</h3>`);
+    html.push(`<div class="card">`);
+    const sorted = [...sched.blocks].sort((a,b)=>a.start.localeCompare(b.start));
+    for (const b of sorted) {
+      html.push(`<div class="row">
+        <div class="row-main">
+          <div class="row-title">${escapeHtml(b.title)}</div>
+          <div class="row-sub">${b.start} – ${b.end}</div>
+        </div>
+        <button class="btn-ghost" data-edit-block="${d}:${b.id}">Edit</button>
+        <button class="btn-ghost" style="color:var(--red)" data-del-block="${d}:${b.id}">×</button>
+      </div>`);
+    }
+    for (const i of sched.checklist) {
+      html.push(`<div class="row">
+        <div class="row-main">
+          <div class="row-title">☐ ${escapeHtml(i.text)}</div>
+          <div class="row-sub">checklist</div>
+        </div>
+        <button class="btn-ghost" data-edit-cli="${d}:${i.id}">Edit</button>
+        <button class="btn-ghost" style="color:var(--red)" data-del-cli="${d}:${i.id}">×</button>
+      </div>`);
+    }
+    html.push(`<div class="row" style="gap:8px">
+      <button class="btn btn-secondary" data-add-block="${d}">+ Time block</button>
+      <button class="btn btn-secondary" data-add-cli="${d}">+ Checklist item</button>
+    </div>`);
+    html.push(`</div>`);
+  }
+
+  // Data
+  html.push(`<h2>Data</h2><div class="card">
+    <div class="row">
+      <div class="row-main"><div class="row-title">Export</div><div class="row-sub">Download all data as JSON</div></div>
+      <button class="btn btn-secondary" data-export>Export</button>
+    </div>
+    <div class="row">
+      <div class="row-main"><div class="row-title">Import</div><div class="row-sub">Replace all data with a JSON file</div></div>
+      <button class="btn btn-secondary" data-import>Import</button>
+    </div>
+    <div class="row">
+      <div class="row-main"><div class="row-title">Reset</div><div class="row-sub">Delete everything</div></div>
+      <button class="btn btn-danger" data-reset>Reset</button>
+    </div>
+  </div>`);
+
+  app.innerHTML = html.join('');
+  wireManage();
+}
+
+function wireManage() {
+  // daily
+  app.querySelector('[data-add-daily]').onclick = () => editMetric('daily');
+  app.querySelectorAll('[data-edit-daily]').forEach(b => b.onclick = () => editMetric('daily', b.dataset.editDaily));
+  app.querySelectorAll('[data-del-daily]').forEach(b => b.onclick = () => {
+    if (!confirm('Delete this metric? Its history will also be removed.')) return;
+    const id = b.dataset.delDaily;
+    data.dailyMetrics = data.dailyMetrics.filter(m=>m.id!==id);
+    for (const k of Object.keys(data.dailyLog)) delete data.dailyLog[k][id];
+    save(); render();
+  });
+  // weekly
+  app.querySelector('[data-add-weekly]').onclick = () => editMetric('weekly');
+  app.querySelectorAll('[data-edit-weekly]').forEach(b => b.onclick = () => editMetric('weekly', b.dataset.editWeekly));
+  app.querySelectorAll('[data-del-weekly]').forEach(b => b.onclick = () => {
+    if (!confirm('Delete this metric? Its history will also be removed.')) return;
+    const id = b.dataset.delWeekly;
+    data.weeklyMetrics = data.weeklyMetrics.filter(m=>m.id!==id);
+    for (const k of Object.keys(data.weeklyLog)) delete data.weeklyLog[k][id];
+    save(); render();
+  });
+  // goals
+  app.querySelector('[data-add-goal]').onclick = () => editGoal();
+  app.querySelectorAll('[data-edit-goal]').forEach(b => b.onclick = () => editGoal(b.dataset.editGoal));
+  app.querySelectorAll('[data-del-goal]').forEach(b => b.onclick = () => {
+    if (!confirm('Delete this long-term goal?')) return;
+    data.longTermGoals = data.longTermGoals.filter(g => g.id !== b.dataset.delGoal);
+    save(); render();
+  });
+  // schedule blocks
+  app.querySelectorAll('[data-add-block]').forEach(b => b.onclick = () => editBlock(b.dataset.addBlock));
+  app.querySelectorAll('[data-edit-block]').forEach(b => {
+    const [dow, id] = b.dataset.editBlock.split(':');
+    b.onclick = () => editBlock(dow, id);
+  });
+  app.querySelectorAll('[data-del-block]').forEach(b => b.onclick = () => {
+    const [dow, id] = b.dataset.delBlock.split(':');
+    data.schedule[dow].blocks = data.schedule[dow].blocks.filter(x=>x.id!==id);
+    save(); render();
+  });
+  // checklist items
+  app.querySelectorAll('[data-add-cli]').forEach(b => b.onclick = () => editChecklistItem(b.dataset.addCli));
+  app.querySelectorAll('[data-edit-cli]').forEach(b => {
+    const [dow, id] = b.dataset.editCli.split(':');
+    b.onclick = () => editChecklistItem(dow, id);
+  });
+  app.querySelectorAll('[data-del-cli]').forEach(b => b.onclick = () => {
+    const [dow, id] = b.dataset.delCli.split(':');
+    data.schedule[dow].checklist = data.schedule[dow].checklist.filter(x=>x.id!==id);
+    save(); render();
+  });
+  // data
+  app.querySelector('[data-export]').onclick = exportData;
+  app.querySelector('[data-import]').onclick = importData;
+  app.querySelector('[data-reset]').onclick = () => {
+    if (!confirm('Delete ALL data? This cannot be undone.')) return;
+    data = DEFAULT_DATA(); save(); render(); toast('Reset');
+  };
+}
+
+// ---------- editors ----------
+function editMetric(kind, id) {
+  const list = kind === 'daily' ? data.dailyMetrics : data.weeklyMetrics;
+  const m = id ? list.find(x=>x.id===id) : { id: uid(), name:'', target:0, unit:'' };
+  openSheet(`
+    <div class="sheet-head">
+      <button class="btn-ghost" id="sCancel">Cancel</button>
+      <h3>${id?'Edit':'New'} ${kind} metric</h3>
+      <button class="btn-ghost" id="sSave" style="font-weight:600">Save</button>
+    </div>
+    <label>Name</label>
+    <input id="fName" placeholder="e.g. Meditate, Workouts" value="${escapeAttr(m.name)}">
+    <label>Target (0 = simple checkbox)</label>
+    <input id="fTarget" type="number" min="0" value="${m.target||0}">
+    <label>Unit (optional)</label>
+    <input id="fUnit" placeholder="e.g. min, miles, sessions" value="${escapeAttr(m.unit||'')}">
+  `, () => {
+    document.getElementById('sCancel').onclick = closeSheet;
+    document.getElementById('sSave').onclick = () => {
+      const name = document.getElementById('fName').value.trim();
+      if (!name) { toast('Name required'); return; }
+      m.name = name;
+      m.target = Math.max(0, parseInt(document.getElementById('fTarget').value, 10) || 0);
+      m.unit = document.getElementById('fUnit').value.trim();
+      if (!id) list.push(m);
+      save(); closeSheet(); render();
+    };
+  });
+}
+
+function editGoal(id) {
+  const g = id ? data.longTermGoals.find(x=>x.id===id) : { id: uid(), name:'', targetDate:'', notes:'', milestones:[] };
+  const msHtml = g.milestones.map((m,i)=>`
+    <div class="row" style="padding-left:0;padding-right:0">
+      <input data-ms-text="${i}" value="${escapeAttr(m.text)}" placeholder="Milestone">
+      <button class="btn-ghost" style="color:var(--red)" data-ms-del="${i}">×</button>
+    </div>`).join('');
+  openSheet(`
+    <div class="sheet-head">
+      <button class="btn-ghost" id="sCancel">Cancel</button>
+      <h3>${id?'Edit':'New'} long-term goal</h3>
+      <button class="btn-ghost" id="sSave" style="font-weight:600">Save</button>
+    </div>
+    <label>Name</label>
+    <input id="fName" placeholder="e.g. Run a marathon" value="${escapeAttr(g.name)}">
+    <label>Target date</label>
+    <input id="fDate" type="date" value="${escapeAttr(g.targetDate||'')}">
+    <label>Notes</label>
+    <textarea id="fNotes" rows="3">${escapeHtml(g.notes||'')}</textarea>
+    <label>Milestones</label>
+    <div id="msList">${msHtml}</div>
+    <button class="btn btn-secondary" id="msAdd" style="margin-top:8px">+ Add milestone</button>
+  `, (sh) => {
+    sh.querySelector('#sCancel').onclick = closeSheet;
+    const rebindMs = () => {
+      sh.querySelectorAll('[data-ms-del]').forEach(b => b.onclick = () => {
+        const i = +b.dataset.msDel;
+        // capture current text values first
+        captureMs();
+        g.milestones.splice(i, 1);
+        rerenderMs();
+      });
+    };
+    const captureMs = () => {
+      sh.querySelectorAll('[data-ms-text]').forEach(inp => {
+        const i = +inp.dataset.msText;
+        if (g.milestones[i]) g.milestones[i].text = inp.value;
+      });
+    };
+    const rerenderMs = () => {
+      sh.querySelector('#msList').innerHTML = g.milestones.map((m,i)=>`
+        <div class="row" style="padding-left:0;padding-right:0">
+          <input data-ms-text="${i}" value="${escapeAttr(m.text)}" placeholder="Milestone">
+          <button class="btn-ghost" style="color:var(--red)" data-ms-del="${i}">×</button>
+        </div>`).join('');
+      rebindMs();
+    };
+    sh.querySelector('#msAdd').onclick = () => {
+      captureMs();
+      g.milestones.push({ id: uid(), text: '', done: false });
+      rerenderMs();
+    };
+    rebindMs();
+    sh.querySelector('#sSave').onclick = () => {
+      captureMs();
+      const name = sh.querySelector('#fName').value.trim();
+      if (!name) { toast('Name required'); return; }
+      g.name = name;
+      g.targetDate = sh.querySelector('#fDate').value || '';
+      g.notes = sh.querySelector('#fNotes').value;
+      g.milestones = g.milestones.filter(m => m.text.trim()).map(m => ({ ...m, text: m.text.trim() }));
+      if (!id) data.longTermGoals.push(g);
+      save(); closeSheet(); render();
+    };
+  });
+}
+
+function editBlock(dow, id) {
+  const list = data.schedule[dow].blocks;
+  const b = id ? list.find(x=>x.id===id) : { id: uid(), start:'09:00', end:'10:00', title:'' };
+  openSheet(`
+    <div class="sheet-head">
+      <button class="btn-ghost" id="sCancel">Cancel</button>
+      <h3>${id?'Edit':'New'} ${DOW_LABEL[dow]} block</h3>
+      <button class="btn-ghost" id="sSave" style="font-weight:600">Save</button>
+    </div>
+    <label>Title</label>
+    <input id="fTitle" placeholder="e.g. Deep work" value="${escapeAttr(b.title)}">
+    <label>Start</label>
+    <input id="fStart" type="time" value="${b.start}">
+    <label>End</label>
+    <input id="fEnd" type="time" value="${b.end}">
+  `, (sh) => {
+    sh.querySelector('#sCancel').onclick = closeSheet;
+    sh.querySelector('#sSave').onclick = () => {
+      const title = sh.querySelector('#fTitle').value.trim();
+      if (!title) { toast('Title required'); return; }
+      b.title = title;
+      b.start = sh.querySelector('#fStart').value;
+      b.end = sh.querySelector('#fEnd').value;
+      if (!id) list.push(b);
+      save(); closeSheet(); render();
+    };
+  });
+}
+
+function editChecklistItem(dow, id) {
+  const list = data.schedule[dow].checklist;
+  const item = id ? list.find(x=>x.id===id) : { id: uid(), text:'' };
+  openSheet(`
+    <div class="sheet-head">
+      <button class="btn-ghost" id="sCancel">Cancel</button>
+      <h3>${id?'Edit':'New'} ${DOW_LABEL[dow]} task</h3>
+      <button class="btn-ghost" id="sSave" style="font-weight:600">Save</button>
+    </div>
+    <label>Task</label>
+    <input id="fText" placeholder="e.g. Take out trash" value="${escapeAttr(item.text)}">
+  `, (sh) => {
+    sh.querySelector('#sCancel').onclick = closeSheet;
+    sh.querySelector('#sSave').onclick = () => {
+      const text = sh.querySelector('#fText').value.trim();
+      if (!text) { toast('Task required'); return; }
+      item.text = text;
+      if (!id) list.push(item);
+      save(); closeSheet(); render();
+    };
+  });
+}
+
+// ---------- export / import ----------
+function exportData() {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `goals-backup-${todayKey()}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast('Exported');
+}
+function importData() {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'application/json';
+  inp.onchange = () => {
+    const f = inp.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const parsed = JSON.parse(r.result);
+        data = Object.assign(DEFAULT_DATA(), parsed);
+        save(); render(); toast('Imported');
+      } catch (e) { toast('Invalid file'); }
+    };
+    r.readAsText(f);
+  };
+  inp.click();
+}
+
+// ---------- utils ----------
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+function escapeAttr(s) { return escapeHtml(s).replace(/`/g, '&#96;'); }
+
+// ---------- tabs / boot ----------
+document.querySelectorAll('#tabs button').forEach(b => {
+  b.onclick = () => { currentTab = b.dataset.tab; render(); };
+});
+render();
+
+// ---------- service worker ----------
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
