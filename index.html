@@ -137,40 +137,50 @@
   }
   .chip:active { background: var(--accent); color: white; }
   .wheel-wrap {
-    position: relative; height: 200px;
+    position: relative; height: 240px;
     margin: 8px -16px;
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 25%, black 75%, transparent 100%);
-            mask-image: linear-gradient(to bottom, transparent 0, black 25%, black 75%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 22%, black 78%, transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0, black 22%, black 78%, transparent 100%);
   }
+  /* proximity (not mandatory) lets a single flick carry across many items;
+     scroll-snap-stop: normal explicitly allows momentum to pass through snap points */
   .wheel {
     height: 100%; overflow-y: scroll;
-    scroll-snap-type: y mandatory;
+    scroll-snap-type: y proximity;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     overscroll-behavior: contain;
   }
   .wheel::-webkit-scrollbar { display: none; }
-  .wheel-spacer { height: 80px; flex-shrink: 0; pointer-events: none; }
+  .wheel-spacer { height: 96px; flex-shrink: 0; pointer-events: none; }
   .wheel-item {
-    height: 40px; line-height: 40px;
+    height: 34px; line-height: 34px;
     text-align: center;
     scroll-snap-align: center;
-    font-size: 20px; font-weight: 500;
+    scroll-snap-stop: normal;
+    font-size: 18px; font-weight: 500;
     font-variant-numeric: tabular-nums;
     color: var(--muted);
     transition: color .12s, font-size .12s, font-weight .12s;
   }
   .wheel-item.selected {
     color: var(--text);
-    font-size: 26px; font-weight: 700;
+    font-size: 24px; font-weight: 700;
   }
   .wheel-center-line {
     position: absolute; left: 24px; right: 24px;
-    top: 50%; height: 40px; transform: translateY(-50%);
+    top: 50%; height: 34px; transform: translateY(-50%);
     border-top: 0.5px solid var(--border);
     border-bottom: 0.5px solid var(--border);
     pointer-events: none;
   }
+  .icon-btn-mini {
+    width: 32px; height: 32px; border-radius: 50%;
+    color: var(--muted); font-size: 18px; line-height: 1;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent;
+  }
+  .icon-btn-mini:active { background: var(--surface-2); }
   .end-preview {
     text-align: center; font-size: 14px; color: var(--muted);
     font-variant-numeric: tabular-nums;
@@ -687,6 +697,7 @@ function renderPlan() {
         <div class="row-title">${DOW_LABEL[d]}</div>
         <div class="row-sub">${sub}</div>
       </div>
+      <button class="icon-btn-mini" data-day-menu="${d}" aria-label="Day options">⋯</button>
       <div class="row-value" style="color:var(--muted)">›</div>
     </div>`);
   }
@@ -697,8 +708,43 @@ function renderPlan() {
   }
 
   app.innerHTML = html.join('');
+  app.querySelectorAll('[data-day-menu]').forEach(el => {
+    el.onclick = (e) => { e.stopPropagation(); editDayTimes(el.dataset.dayMenu); };
+  });
   app.querySelectorAll('[data-plan-day]').forEach(el => {
     el.onclick = () => openPlanDay(el.dataset.planDay);
+  });
+}
+
+function editDayTimes(dow) {
+  const sched = data.schedule[dow];
+  const def = data.defaults || { wakeTime: '06:00', sleepTime: '22:00' };
+  openSheet(`
+    <div class="sheet-head">
+      <button class="btn-ghost" id="sCancel">Cancel</button>
+      <h3>${DOW_LABEL[dow]} times</h3>
+      <button class="btn-ghost" id="sSave" style="font-weight:600">Save</button>
+    </div>
+    <div class="row-sub" style="padding:0 4px 8px">Leave blank to use the defaults (${def.wakeTime} / ${def.sleepTime}).</div>
+    <label>Wake time</label>
+    <input id="fWake" type="time" value="${escapeAttr(sched.wakeTime || '')}">
+    <label>Sleep time</label>
+    <input id="fSleep" type="time" value="${escapeAttr(sched.sleepTime || '')}">
+    ${(sched.wakeTime || sched.sleepTime) ? `<button class="btn btn-secondary" id="sClear" style="width:100%;margin-top:14px">Clear overrides</button>` : ''}
+  `, sh => {
+    sh.querySelector('#sCancel').onclick = closeSheet;
+    sh.querySelector('#sSave').onclick = () => {
+      const w = sh.querySelector('#fWake').value;
+      const s = sh.querySelector('#fSleep').value;
+      if (w) sched.wakeTime = w; else delete sched.wakeTime;
+      if (s) sched.sleepTime = s; else delete sched.sleepTime;
+      save(); closeSheet(); render();
+    };
+    const clr = sh.querySelector('#sClear');
+    if (clr) clr.onclick = () => {
+      delete sched.wakeTime; delete sched.sleepTime;
+      save(); closeSheet(); render();
+    };
   });
 }
 

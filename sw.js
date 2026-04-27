@@ -1,4 +1,4 @@
-const CACHE = 'goals-v4';
+const CACHE = 'goals-v5';
 const ASSETS = [
   './',
   './index.html',
