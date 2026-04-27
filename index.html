@@ -184,6 +184,8 @@ const DEFAULT_DATA = () => ({
   weeklyMetrics: [],
   weeklyLog: {},      // { "YYYY-Www": { metricId: value } }
   longTermGoals: [],  // {id, name, targetDate, notes, milestones:[{id,text,done}]}
+  weeklyChecklist: [],       // [{id, text}]
+  weeklyChecklistLog: {},    // { "YYYY-Www": { itemId: true } }
   schedule: {         // dow -> {blocks:[{id,start,end,title}], checklist:[{id,text}]}
     mon: { blocks: [], checklist: [] },
     tue: { blocks: [], checklist: [] },
@@ -318,6 +320,22 @@ function renderToday() {
     html.push(`</div>`);
   }
 
+  // Weekly checklist (shared across the whole week)
+  const wcLog = data.weeklyChecklistLog[wKey] = data.weeklyChecklistLog[wKey] || {};
+  if (data.weeklyChecklist.length > 0) {
+    const doneCount = data.weeklyChecklist.filter(i => wcLog[i.id]).length;
+    html.push(`<h2>This Week <span class="pill" style="vertical-align:middle">${doneCount}/${data.weeklyChecklist.length}</span></h2>`);
+    html.push(`<div class="card">`);
+    for (const item of data.weeklyChecklist) {
+      const done = !!wcLog[item.id];
+      html.push(`<div class="row">
+        <button class="check ${done?'done':''}" data-toggle-weekly-cli="${item.id}"></button>
+        <div class="row-main"><div class="row-title" style="${done?'color:var(--muted);text-decoration:line-through':''}">${escapeHtml(item.text)}</div></div>
+      </div>`);
+    }
+    html.push(`</div>`);
+  }
+
   // Today's schedule
   html.push(`<h2>${DOW_LABEL[dow]} Schedule</h2>`);
   if (sched.blocks.length === 0) {
@@ -378,12 +396,20 @@ function renderToday() {
       save(); render();
     };
   });
+  app.querySelectorAll('[data-toggle-weekly-cli]').forEach(el => {
+    el.onclick = () => {
+      const id = el.dataset.toggleWeeklyCli;
+      wcLog[id] = !wcLog[id];
+      save(); render();
+    };
+  });
 }
 
 // ----- WEEK -----
 function renderWeek() {
   const wKey = isoWeekKey();
   const wLog = data.weeklyLog[wKey] = data.weeklyLog[wKey] || {};
+  const wcLog = data.weeklyChecklistLog[wKey] = data.weeklyChecklistLog[wKey] || {};
 
   const html = [];
   html.push(`<h1>This Week <span class="pill" style="vertical-align:middle">${wKey}</span></h1>`);
@@ -409,6 +435,22 @@ function renderWeek() {
           <span class="v">${v}</span>
           <button data-step-weekly="${m.id}" data-delta="1">+</button>
         </div>
+      </div>`);
+    }
+    html.push(`</div>`);
+  }
+
+  // Weekly checklist
+  html.push(`<h2>Checklist</h2>`);
+  if (data.weeklyChecklist.length === 0) {
+    html.push(`<div class="card"><div class="empty">No weekly checklist items. Add some in Manage.</div></div>`);
+  } else {
+    html.push(`<div class="card">`);
+    for (const item of data.weeklyChecklist) {
+      const done = !!wcLog[item.id];
+      html.push(`<div class="row">
+        <button class="check ${done?'done':''}" data-toggle-weekly-cli="${item.id}"></button>
+        <div class="row-main"><div class="row-title" style="${done?'color:var(--muted);text-decoration:line-through':''}">${escapeHtml(item.text)}</div></div>
       </div>`);
     }
     html.push(`</div>`);
@@ -442,6 +484,13 @@ function renderWeek() {
       const id = el.dataset.stepWeekly;
       const d = parseInt(el.dataset.delta, 10);
       wLog[id] = Math.max(0, (wLog[id] || 0) + d);
+      save(); render();
+    };
+  });
+  app.querySelectorAll('[data-toggle-weekly-cli]').forEach(el => {
+    el.onclick = () => {
+      const id = el.dataset.toggleWeeklyCli;
+      wcLog[id] = !wcLog[id];
       save(); render();
     };
   });
@@ -524,6 +573,20 @@ function renderManage() {
     </div>`);
   }
   html.push(`<div class="row"><button class="btn" data-add-weekly>+ Add weekly metric</button></div>`);
+  html.push(`</div>`);
+
+  // Weekly checklist
+  html.push(`<h2>Weekly Checklist</h2><div class="card">`);
+  for (const item of data.weeklyChecklist) {
+    html.push(`<div class="row">
+      <div class="row-main">
+        <div class="row-title">${escapeHtml(item.text)}</div>
+      </div>
+      <button class="btn-ghost" data-edit-wcli="${item.id}">Edit</button>
+      <button class="btn-ghost" style="color:var(--red)" data-del-wcli="${item.id}">Delete</button>
+    </div>`);
+  }
+  html.push(`<div class="row"><button class="btn" data-add-wcli>+ Add weekly task</button></div>`);
   html.push(`</div>`);
 
   // Long-term goals
@@ -614,6 +677,16 @@ function wireManage() {
     const id = b.dataset.delWeekly;
     data.weeklyMetrics = data.weeklyMetrics.filter(m=>m.id!==id);
     for (const k of Object.keys(data.weeklyLog)) delete data.weeklyLog[k][id];
+    save(); render();
+  });
+  // weekly checklist
+  app.querySelector('[data-add-wcli]').onclick = () => editWeeklyChecklistItem();
+  app.querySelectorAll('[data-edit-wcli]').forEach(b => b.onclick = () => editWeeklyChecklistItem(b.dataset.editWcli));
+  app.querySelectorAll('[data-del-wcli]').forEach(b => b.onclick = () => {
+    if (!confirm('Delete this weekly task? Its completion history will also be removed.')) return;
+    const id = b.dataset.delWcli;
+    data.weeklyChecklist = data.weeklyChecklist.filter(x => x.id !== id);
+    for (const k of Object.keys(data.weeklyChecklistLog)) delete data.weeklyChecklistLog[k][id];
     save(); render();
   });
   // goals
@@ -776,6 +849,29 @@ function editBlock(dow, id) {
       b.start = sh.querySelector('#fStart').value;
       b.end = sh.querySelector('#fEnd').value;
       if (!id) list.push(b);
+      save(); closeSheet(); render();
+    };
+  });
+}
+
+function editWeeklyChecklistItem(id) {
+  const list = data.weeklyChecklist;
+  const item = id ? list.find(x => x.id === id) : { id: uid(), text: '' };
+  openSheet(`
+    <div class="sheet-head">
+      <button class="btn-ghost" id="sCancel">Cancel</button>
+      <h3>${id?'Edit':'New'} weekly task</h3>
+      <button class="btn-ghost" id="sSave" style="font-weight:600">Save</button>
+    </div>
+    <label>Task</label>
+    <input id="fText" placeholder="e.g. Review finances" value="${escapeAttr(item.text)}">
+  `, (sh) => {
+    sh.querySelector('#sCancel').onclick = closeSheet;
+    sh.querySelector('#sSave').onclick = () => {
+      const text = sh.querySelector('#fText').value.trim();
+      if (!text) { toast('Task required'); return; }
+      item.text = text;
+      if (!id) list.push(item);
       save(); closeSheet(); render();
     };
   });
